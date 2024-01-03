@@ -1,0 +1,40 @@
+### How to run c++ with gurobi on SMU M3 HPC###
+Response from Lagrone, John(Ticket: NCKG476411)
+
+I can compile on M3 like the following (note, I rebuilt the C++ library on M3 which isn’t something you can do yourself, so it may compile now with no changes. See https://support.gurobi.com/hc/en-us/articles/360039093112-How-do-I-resolve-undefined-reference-errors-while-linking-Gurobi-in-C-):
+
+# load modules
+module load gcc/11.2.0
+module load gurobi/10.0.1
+
+# copy an example file (or use your own) to your current directory
+cp /hpc/m3/apps/gurobi/10.0.1/linux64/examples/c++/mip1_c++.cpp .
+
+# compile the example
+g++ mip1_c++.cpp  -lgurobi_c++ -lgurobi100 -o mip1_c++.x
+
+When you load the module on M3, it sets PATH, GUROBI_HOME, GRB_LICENSE_FILE, LD_LIBRARY_PATH, LIBRARY_PATH, and CPATH environment variables so it can find the correct libraries to link to. You likely need to set those to find the header files, for example, on Genuse. For example, on M3, “/hpc/m3/apps/gurobi/10.0.1/linux64/include” is added to the CPATH environment variable so the compilers can find the header files.
+
+#=========================================================================================
+### How do I resolve "undefined reference" errors while linking Gurobi in C++? ###
+#https://support.gurobi.com/hc/en-us/articles/360039093112-How-do-I-resolve-undefined-reference-errors-while-linking-Gurobi-in-C-
+
+While building a C++ application that uses Gurobi, If the linking process causes "undefined reference" errors like these
+undefined reference to `GRBModel::addVar(double, double, double, char, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >)'
+undefined reference to `GRBModel::addConstr(GRBTempConstr const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >)'
+undefined reference to `GRBVar::get[abi:cxx11](GRB_StringAttr) const'
+
+you should recompile the C++ API library and replace the old one to resolve any ABI incompatibilities. On Linux, this can be done from the system command prompt with the following (changing the directory to match your Gurobi version):
+
+cd /opt/gurobi1100/linux64/src/build
+make
+cp libgurobi_c++.a ../../lib/
+For macOS, please use the respective path to the build directory by replacing linux64 with macos_universal2.
+
+#=========================================================================================
+### How to run c++ with gurobi on SMU Lyle Genuse machine###
+Response from Wikerson,Merlin(Ticket:NCKG476411)
+Here's an example compile command on genuse:
+
+ g++ -Wl,-rpath=/usr/local/gurobi/linux64/lib -I/usr/local/gurobi/linux64/include lp_c++.cpp -L/usr/local/gurobi/linux64/lib -lgurobi_g++5.2 -lgurobi100 -o lp_c++
+ 
