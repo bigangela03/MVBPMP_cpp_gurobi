@@ -23,6 +23,10 @@ using namespace std::string_literals;
 
 int numV = 3; //number of vehicles
 int numNodes; //number of nodes in instance
+bool ADD_CUTS = false;
+bool PRINT_x_WHEN_INTEGER_SOL = false;
+bool PRINT_y_WHEN_INTEGER_SOL = true;
+bool SEARCH_K_BEST_SOL = true;
 
 string
 itos (int i)
@@ -62,45 +66,77 @@ protected:
 	    printf ("\n======> an integer solution found.\n");
 	    int i, j, q;
 	    double ***x = NULL;
+	    double ***y = NULL;
+	    int *overlapVeh = NULL;
+	    int sum = 0;
+
 	    x = new double**[n];
+	    y = new double**[n];
+	    overlapVeh = new int[numV];
+	    for (i = 0; i < numV; i++)
+	      overlapVeh[i] = -1;
 	    for (i = 0; i < n; i++)
 	      {
 		x[i] = new double*[n];
+		y[i] = new double*[n];
 		for (j = 0; j < n; j++)
 		  {
 		    x[i][j] = new double[numV];
+		    y[i][j] = new double[numV];
 		  }
 	      }
-
-	    printf ("x vars: ");
 	    for (i = 0; i < n; i++)
 	      {
 		for (j = 0; j < n; j++)
 		  {
 		    x[i][j] = getSolution (xv[i][j], numV);
-
+		    y[i][j] = getSolution (yv[i][j], numV);
+		    sum = 0;
 		    for (q = 0; q < numV; q++)
 		      {
-			if (x[i][j][q] > 0.5)
+			if (PRINT_x_WHEN_INTEGER_SOL)
+			  if (x[i][j][q] > 0.5)
+			    printf ("x: %3d ->%3d (v%d)\n", i + 1, j + 1,
+				    q + 1);
+			if (PRINT_y_WHEN_INTEGER_SOL)
+			  if (y[i][j][q] > 0.5)
+			    printf ("y: %3d ->%3d (v%d)\n", i + 1, j + 1,
+				    q + 1);
+		      }
+		    if (ADD_CUTS)
+		      {
+			for (q = 0; q < numV; q++)
+			  if (y[i][j][q] > 0.5)
+			    {
+			      overlapVeh[q] = 1;
+			      sum += 1;
+			    }
+			GRBLinExpr expr = 0;
+			if (sum > 1.5)
 			  {
-			    printf ("%d->%d ", i + 1, j + 1);
-			    printf ("(%d)\n: ", q + 1);
+			    printf ("======> request conflict found \n");
+			    for (q = 0; q < numV; q++)
+			      if (overlapVeh[q] == 1)
+				expr += yv[i][j][q];
+			    addLazy (expr <= 1);
 			  }
 		      }
 		  }
 	      }
+
 	    for (i = 0; i < n; i++)
 	      {
 		for (j = 0; j < n; j++)
 		  {
 		    delete[] x[i][j];
-		    //delete[] y[i][j];
+		    delete[] y[i][j];
 		  }
 		delete[] x[i];
-		//delete[] y[i];
+		delete[] y[i];
 	      }
 	    delete[] x;
-	    //delete[] y;
+	    delete[] y;
+	    delete[] overlapVeh;
 	  }
       }
     catch (GRBException e)
@@ -186,6 +222,7 @@ main (int argc, char *argv[])
 
 	  //==============start calling Gurobi===============
 	  int i, j, k, q;
+	  int status, nSolutions;
 
 	  GRBEnv *env = NULL;
 	  //GRBVar x[n][n][numV];
@@ -267,6 +304,9 @@ main (int argc, char *argv[])
 		      y[i][ogn][q].set (GRB_DoubleAttr_UB, 0);
 		      x[n - 1][i][q].set (GRB_DoubleAttr_UB, 0);
 		      y[n - 1][i][q].set (GRB_DoubleAttr_UB, 0);
+		      for (j = 0; j < n; j++)
+			if (wt[i][j] == 0)
+			  y[i][j][q].set (GRB_DoubleAttr_UB, 0);
 		    }
 		}
 
@@ -368,18 +408,38 @@ main (int argc, char *argv[])
 			    "flowBound_" + itos (i) + "_" + itos (j) + "_"
 				+ itos (q));
 		      }
+
+		  //add redundant constraint to test if same multi obj value
+		  //caused by binary variable
+		  /*
+		   for (i = 0; i < n - 1; i++)
+		   for (j = 0; j < n; j++)
+		   for (k = 0; k < n - 1; k++)
+		   {
+		   GRBLinExpr expr = 0.0;
+		   if (k != ogn)
+		   expr += u[i][j][k][q] - x[i][k][q];
+		   model.addConstr (
+		   expr <= 0,
+		   "unique_triples_" + itos (i) + "_" + itos (j)
+		   + "_" + itos (q));
+		   }
+		   */
 		}
 
 	      //one vehicle for one cargo
-	      for (i = 0; i < n - 1; i++)
-		for (j = 0; j < n; j++)
-		  {
-		    GRBLinExpr expr = 0.0;
-		    for (q = 0; q < numV; q++)
-		      expr += y[i][j][q];
-		    model.addConstr (expr <= 1,
-				     "one-one" + itos (i) + "_" + itos (j));
-		  }
+	      if (!ADD_CUTS)
+		{
+		  for (i = 0; i < n - 1; i++)
+		    for (j = 0; j < n; j++)
+		      {
+			GRBLinExpr expr = 0.0;
+			for (q = 0; q < numV; q++)
+			  expr += y[i][j][q];
+			model.addConstr (expr <= 1,
+					 "one-one" + itos (i) + "_" + itos (j));
+		      }
+		}
 
 	      //set up objective
 	      GRBLinExpr obj = 0.0;
@@ -401,14 +461,119 @@ main (int argc, char *argv[])
 	      //printf ("vw = %lf\n", vw);
 
 	      // Set callback function
-	      printIntSol cb = printIntSol (x, y, n, numV);
-	      model.setCallback (&cb);
+	      //printIntSol cb = printIntSol (x, y, n, numV);
+	      //model.setCallback (&cb);
+
+	      if (SEARCH_K_BEST_SOL)
+		{
+		  // do a systematic search for the k-best solutions
+		  model.set (GRB_IntParam_PoolSearchMode, 2);
+		  // Limit how many solutions to collect
+		  model.set (GRB_IntParam_PoolSolutions, 150);
+		}
 
 	      // Optimize model
 	      model.optimize ();
 
 	      //write model to file
 	      model.write ("MVBPMP.lp");
+
+	      // Status checking
+	      status = model.get (GRB_IntAttr_Status);
+	      if (status == GRB_INF_OR_UNBD || status == GRB_INFEASIBLE
+		  || status == GRB_UNBOUNDED)
+		{
+		  cout << "The model cannot be solved "
+		      << "because it is infeasible or unbounded" << endl;
+		  return 1;
+		}
+	      if (status != GRB_OPTIMAL)
+		{
+		  cout << "Optimization was stopped with status " << status
+		      << endl;
+		  return 1;
+		}
+
+	      //retrieve K best objs
+	      if (SEARCH_K_BEST_SOL)
+		{
+		  // Print number of solutions stored
+		  nSolutions = model.get (GRB_IntAttr_SolCount);
+		  cout << "Number of solutions found: " << nSolutions << endl;
+
+		  // Print objective values of solutions
+		  for (int e = 0; e < nSolutions; e++)
+		    {
+		      model.set (GRB_IntParam_SolutionNumber, e);
+		      cout << model.get (GRB_DoubleAttr_PoolObjVal) << " ";
+		      if (e % 10 == 9)
+			cout << endl;
+		    }
+		  cout << endl;
+
+		  // print
+		  double oldobj = -1;
+		  double newobj = 0;
+		  //for (int e = 0; e < nSolutions; e++)
+		  for (int e = 0; e < 10; e++)
+		    {
+		      model.set (GRB_IntParam_SolutionNumber, e);
+		      newobj = model.get (GRB_DoubleAttr_PoolObjVal);
+		      if (newobj == oldobj)
+			continue;
+
+		      oldobj = newobj;
+
+		      printf ("=== %d (obj=%lf) ===\n", e + 1, newobj);
+		      printf ("------ print x=1 ------\n");
+		      for (q = 0; q < numV; q++)
+			for (i = 0; i < n - 1; i++)
+			  for (j = 0; j < n; j++)
+			    {
+			      double xval = x[i][j][q].get (GRB_DoubleAttr_Xn);
+			      if (xval > 0.99 && xval < 1.01)
+				printf ("%3d %3d  v%d\n", i + 1, j + 1, q + 1);
+			    }
+		      printf ("------ print y=1 ------\n");
+		      for (q = 0; q < numV; q++)
+			for (i = 0; i < n - 1; i++)
+			  for (j = 0; j < n; j++)
+			    {
+			      double yval = y[i][j][q].get (GRB_DoubleAttr_Xn);
+			      if (yval > 0.99 && yval < 1.01)
+				printf ("%3d %3d  v%d (w=%lf)\n", i + 1, j + 1,
+					q + 1, wt[i][j]);
+			    }
+		      printf ("------ print theta>0.000001 ------\n");
+		      for (q = 0; q < numV; q++)
+			for (i = 0; i < n - 1; i++)
+			  for (j = 0; j < n; j++)
+			    {
+			      double thetaval = theta[i][j][q].get (
+				  GRB_DoubleAttr_Xn);
+			      if (thetaval > 0.000001)
+				printf ("%3d %3d  v%d flow=%lf\n", i + 1, j + 1,
+					q + 1, thetaval);
+			    }
+		      printf ("------ print u>0.000001 ------\n");
+		      for (q = 0; q < numV; q++)
+			{
+			  int ogn = origin[q];
+			  for (i = 0; i < n - 1; i++)
+			    for (j = 0; j < n; j++)
+			      for (k = 0; k < n - 1; k++)
+				if (k != ogn)
+				  {
+				    double uval = u[i][j][k][q].get (
+					GRB_DoubleAttr_Xn);
+				    if (uval > 0.000001)
+				      printf ("%3d %3d %3d  v%d\n", i + 1,
+					      j + 1, k + 1, q + 1);
+				  }
+			}
+
+		    }
+		}
 
 	      // Extract solution
 	      if (model.get (GRB_IntAttr_SolCount) > 0)
