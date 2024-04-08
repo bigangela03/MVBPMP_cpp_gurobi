@@ -37,4 +37,10 @@ Response from Wikerson,Merlin(Ticket:NCKG476411)
 Here's an example compile command on genuse:
 
  g++ -Wl,-rpath=/usr/local/gurobi/linux64/lib -I/usr/local/gurobi/linux64/include lp_c++.cpp -L/usr/local/gurobi/linux64/lib -lgurobi_g++5.2 -lgurobi100 -o lp_c++
+
+### How to run openMP
+
+ydong@genuse62.smu.edu$ g++ -Wl,-rpath=/usr/local/gurobi/linux64/lib -I/usr/local/gurobi/linux64/include -fopenmp openmptest.cpp -L/usr/local/gurobi/linux64/lib -lgurobi_g++5.2 -lgurobi100 -o test -ldl
+
+ydong@genuse62.smu.edu$ ./test
  

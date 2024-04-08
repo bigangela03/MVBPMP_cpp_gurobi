@@ -1,0 +1,56 @@
+==============================================================
+Multiscenario feature
+
+--------------------------------------------------
+https://support.gurobi.com/hc/en-us/community/posts/7445210984593-Gurobipy-Parallism-Multscenario-or-multiprocessing
+Q:
+I have a question regarding the multiscenario capability of gurobi. I am using gurobipy to solve a complex MIP network routing problem iteratively. I was wondering if once multiple scenarios are defined and the "m.optimize()" command is executed are the scenarios being solved sequentially or distributed to cores and solved in parallel? I have seen posts on using  multiprocessing in python I believe with separate environments for each model and was wondering if that might be a better alternative or if the multiscenario capability will suffice
+A:
+The multiscenario feature tries to take advantage of parallelism as good as possible. Thus, in many cases, it should perform better than just solving all scenarios in parallel by hand. Unfortunately, this cannot be guaranteed and thus, you would have to try both approaches to be 100% certain.
+
+--------------------------------------------------
+https://www.gurobi.com/documentation/current/refman/specifying_multiple_scenar.html
+
+
+==============================================================
+OpenMP
+
+https://groups.google.com/g/gurobi/c/vglDHU9yWi4
+
+A:
+--------------------------------------------------
+complied this code with g++ -fopenmp -lguorib_c++ -lgurobi45 -lpthread options 
+--------------------------------------------------
+use this example to implement a C++ coding with openmp and gurobi API.
+--------------------------------------------------
+#include <gurobi_c++.h>
+#include <omp.h>
+#include <sstream>
+using namespace std;
+
+ int main() {
+	 GRBEnv* env = 0;
+	 GRBVar* x = 0;
+
+	 env = new GRBEnv();
+	 GRBModel model = GRBModel(*env);
+
+	 long NumTot = 10000000;
+	 x = model.addVars(NumTot, GRB_CONTINUOUS);
+        int nthread = omp_get_num_threads();
+
+	 model.update();
+
+#pragma omp parallel for num_threads(nthread)
+      for (int i = 0; i < NumTot; i++) {
+    	  ostringstream vname;
+    	  vname << "x" << i;
+    	  //cout << "x" << i << endl << endl;
+           x[i].set(GRB_DoubleAttr_LB,0.0);
+           x[i].set(GRB_DoubleAttr_UB,1.0);
+           x[i].set(GRB_DoubleAttr_Obj,1.0);
+           x[i].set(GRB_StringAttr_VarName, vname.str());
+      }
+}
+
+

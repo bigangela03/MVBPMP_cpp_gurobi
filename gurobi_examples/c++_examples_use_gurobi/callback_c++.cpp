@@ -40,6 +40,8 @@ class mycallback: public GRBCallback
   protected:
     void callback () {
       try {
+	  //https://www.gurobi.com/documentation/9.1/refman/cb_codes.html
+	  //check the above website for the detailed info on callback code
         if (where == GRB_CB_POLLING) {
           // Ignore polling callback
         } else if (where == GRB_CB_PRESOLVE) {
