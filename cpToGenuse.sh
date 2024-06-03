@@ -12,3 +12,5 @@ scp openmp_example_pi_critical.cpp ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
 scp openmp_example_for_num_threads.cpp ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
 scp openmp_example_pi_reduction.cpp ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
 scp openmp_test_mvbpmp.cpp ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
+scp openmp_test_mvbpmp_john.cpp ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
+scp MVBPMP_LR_openmp.cpp ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/

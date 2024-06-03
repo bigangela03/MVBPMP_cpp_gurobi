@@ -704,7 +704,7 @@ main (int argc, char *argv[])
 	  double UB = bigM;
 	  double LB = -bigM;
 
-	  double LR_bound_tolerance = 0.05;
+	  double LR_gap_tolerance = 0.05;
 	  double LR_complementarity_tolerance = 0.0001;
 	  double LR_min_lamda = 0.0001;
 	  double LR_miu_tolerance = 0.00000001;
@@ -754,11 +754,11 @@ main (int argc, char *argv[])
 	  int maxItr = 3;
 	  int countItr = 0;
 
-	  cout << "===> LR_bound_tolerance = " << LR_bound_tolerance << endl;
+	  cout << "===> LR_gap_tolerance = " << LR_gap_tolerance << endl;
 
 	  endTimeOfLastIteration = clock ();
 	  endTimeOfLastIterationWallClock = high_resolution_clock::now ();
-	  while ((UB - LB) / UB > LR_bound_tolerance)
+	  while ((UB - LB) / UB > LR_gap_tolerance)
 	    {
 
 	      countItr++;
@@ -1192,9 +1192,9 @@ main (int argc, char *argv[])
 		  endTimeOfLastIterationWallClock =
 		      high_resolution_clock::now ();
 
-		  if ((UB - LB) / UB <= LR_bound_tolerance)
+		  if ((UB - LB) / UB <= LR_gap_tolerance)
 		    cout << "=== will stop loop because gap " << (UB - LB) / UB
-			<< " < LR_bound_toleranc " << LR_bound_tolerance
+			<< " < LR_gap_toleranc " << LR_gap_tolerance
 			<< endl;
 
 		  if (LR_miu <= LR_miu_tolerance)
@@ -1407,9 +1407,9 @@ main (int argc, char *argv[])
 		}
 
 	      printf ("===> LB UB gap = %lf \n", (UB - LB) / UB);
-	      if ((UB - LB) / UB <= LR_bound_tolerance)
-		cout << "=== will stop loop because gap < LR_bound_toleranc "
-		    << LR_bound_tolerance << endl;
+	      if ((UB - LB) / UB <= LR_gap_tolerance)
+		cout << "=== will stop loop because gap < LR_gap_toleranc "
+		    << LR_gap_tolerance << endl;
 
 	      reportTime (endTimeOfLastIteration,
 			  endTimeOfLastIterationWallClock);

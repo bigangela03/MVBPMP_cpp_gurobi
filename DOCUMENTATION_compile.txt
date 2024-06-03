@@ -43,4 +43,6 @@ Here's an example compile command on genuse:
 ydong@genuse62.smu.edu$ g++ -Wl,-rpath=/usr/local/gurobi/linux64/lib -I/usr/local/gurobi/linux64/include -fopenmp openmptest.cpp -L/usr/local/gurobi/linux64/lib -lgurobi_g++5.2 -lgurobi100 -o test -ldl
 
 ydong@genuse62.smu.edu$ ./test
- 
+
+### with auto clock var, add 
+-std=c++20 or -fconcepts 
