@@ -49,6 +49,8 @@ bool USE_LR_MULTIPLIER_TYPE_C = true;
 bool PRINT_VAR_VALUR = false;
 bool PRINT_CONFLICT_PICKUP = true;
 bool PRINT_LRmultiplierTypeB_update_process = false;
+//feed the LR solution to Gurobi and find the optimal solution
+bool DO_STAGE_TWO = true;
 
 double bigM = 10000000;
 
@@ -915,7 +917,6 @@ main (int argc, char *argv[])
 
       try
 	{
-
 	  env = new GRBEnv ();
 	  GRBModel model = GRBModel (*env);
 
@@ -1349,25 +1350,6 @@ main (int argc, char *argv[])
       printVar (solx_best, soly_best, solu_best, origin);
     }
 
-  /*
-   printf ("Selected arcs: \n");
-   for (int q = 0; q < numV; q++)
-   for (int i = 0; i < n; i++)
-   for (int j = 0; j < n; j++)
-   {
-   if (solx_best[i][j][q] > 0.9)
-   printf ("%d -- %d (%d)\n", i + 1, j + 1, q + 1);
-   }
-
-   printf ("Selected requests: \n");
-   for (int q = 0; q < numV; q++)
-   for (int i = 0; i < n; i++)
-   for (int j = 0; j < n; j++)
-   {
-   if (soly_best[i][j][q] > 0.9)
-   printf ("%d -- %d (%d)\n", i + 1, j + 1, q + 1);
-   }
-   */
   cout << endl << "===> The total time since setting up Gurobi environment: "
       << endl;
   reportTime (beginTime, beginWallClock);
@@ -1386,6 +1368,443 @@ main (int argc, char *argv[])
   printf ("SolutionLB = %lf\n", LB);
   printf ("SolutionUB = %lf\n", UB);
   printf ("SolutionGap = %lf\n", (UB - LB) / UB);
+
+  if (!DO_STAGE_TWO)
+    return 0;
+
+  //*********************** START STAGE TWO ****************************
+  //********************************************************************
+  //the model is supposed to be the same with the MVBPMP in LR process
+  //but 1. LR model has pre-setup of variables upperbound
+  //this model in stage two doesn't, but only the initial solution from LR
+  //2. this model set up the timeLimit: LR + stage2 = 24 hours
+
+  if (DO_STAGE_TWO)
+    {
+      double secInStage1 = elapsedWallClock.count () * 1e-9;
+      double stage2TimeLimit;
+      if (86400 - secInStage1 - 300 > 0)
+	{
+	  stage2TimeLimit = 86400 - secInStage1 - 300;
+	  cout << "stage2TimeLimit = 86400 - secInStage1 - 300 = "
+	      << stage2TimeLimit << endl;
+	}
+      else
+	{
+	  cout
+	      << "===> There is not enough time for stage 2 running.Quit running."
+	      << endl;
+	  return 0;
+	}
+
+      int i, j, k, q;
+      int status, nSolutions;
+
+      GRBEnv *env = NULL;
+      //GRBVar x[n][n][numV];
+      //GRBVar y[n][n][numV];
+      GRBVar s[n][numV];
+      GRBVar u[n][n][n][numV];
+      GRBVar theta[n][n][numV];
+
+      GRBVar ***x = NULL;
+      GRBVar ***y = NULL;
+      x = new GRBVar**[n];
+      y = new GRBVar**[n];
+      for (i = 0; i < n; i++)
+	{
+	  x[i] = new GRBVar*[n];
+	  y[i] = new GRBVar*[n];
+	  for (j = 0; j < n; j++)
+	    {
+	      x[i][j] = new GRBVar[numV];
+	      y[i][j] = new GRBVar[numV];
+	    }
+	}
+
+      try
+	{
+	  env = new GRBEnv ();
+	  GRBModel model = GRBModel (*env);
+
+	  // Create binary decision variables
+	  for (q = 0; q < numV; q++)
+	    {
+	      for (i = 0; i < n; i++)
+		{
+		  s[i][q] = model.addVar (0.0, n, 0.0, GRB_CONTINUOUS,
+					  "s_" + itos (i) + "_" + itos (q));
+		  for (j = 0; j < n; j++)
+		    {
+		      x[i][j][q] = model.addVar (
+			  0.0, 1.0, 0, GRB_BINARY,
+			  "x_" + itos (i) + "_" + itos (j) + "_" + itos (q));
+		      y[i][j][q] = model.addVar (
+			  0.0, 1.0, 0, GRB_BINARY,
+			  "y_" + itos (i) + "_" + itos (j) + "_" + itos (q));
+		      theta[i][j][q] = model.addVar (
+			  0.0,
+			  GRB_INFINITY,
+			  0.0,
+			  GRB_CONTINUOUS,
+			  "theta_" + itos (i) + "_" + itos (j) + "_"
+			      + itos (q));
+
+		      for (k = 0; k < n; k++)
+			{
+			  string s = "u_" + itos (i) + "_" + itos (j) + "_"
+			      + itos (k) + "_" + itos (q);
+			  u[i][j][k][q] = model.addVar (0.0, GRB_INFINITY, 0.0,
+							GRB_CONTINUOUS, s);
+			}
+		    }
+		}
+
+	      int ogn = origin[q];
+	      for (i = 0; i < n; i++)
+		{
+		  x[i][i][q].set (GRB_DoubleAttr_UB, 0);
+		  y[i][i][q].set (GRB_DoubleAttr_UB, 0);
+		  x[i][ogn][q].set (GRB_DoubleAttr_UB, 0);
+		  y[i][ogn][q].set (GRB_DoubleAttr_UB, 0);
+		  x[n - 1][i][q].set (GRB_DoubleAttr_UB, 0);
+		  y[n - 1][i][q].set (GRB_DoubleAttr_UB, 0);
+		  for (j = 0; j < n; j++)
+		    if (wt[i][j] == 0)
+		      y[i][j][q].set (GRB_DoubleAttr_UB, 0);
+		}
+	    }
+
+	  // set up constraints
+	  GRBConstr *vehOriginConstr = 0;
+	  GRBConstr *vehDestConstr = 0;
+	  vehOriginConstr = new GRBConstr[numV];
+	  vehDestConstr = new GRBConstr[numV];
+
+	  for (q = 0; q < numV; q++)
+	    {
+	      int ogn = origin[q];
+
+	      //vehicle goes out of origins
+	      GRBLinExpr expr1 = 0.0;
+	      for (i = 0; i < n; i++)
+		expr1 += x[ogn][i][q];
+
+	      //model.addConstr (expr1 == 1, "origin_" + itos (q));
+	      vehOriginConstr[q] = model.addConstr (expr1 == 1,
+						    "origin_" + itos (q));
+
+	      //vehicle goes back to node n
+	      GRBLinExpr expr2 = 0.0;
+	      for (i = 0; i < n - 1; i++)
+		expr2 += x[i][n - 1][q];
+	      //model.addConstr (expr2 == 1, "destination_" + itos (q));
+	      vehDestConstr[q] = model.addConstr (expr2 == 1,
+						  "destination_" + itos (q));
+
+	      //flow conservation
+	      for (int k = 0; k < n - 1; k++)
+		{
+		  if (k != ogn)
+		    {
+		      GRBLinExpr expr = 0;
+		      for (i = 0; i < n - 1; i++)
+			expr += x[i][k][q];
+
+		      //BE CAREFUL!
+		      //I used j=1 to start which exclues node 0
+		      //which cause that the optimal profit is lower!
+		      for (j = 0; j < n; j++)
+			expr -= x[k][j][q];
+		      model.addConstr (
+			  expr == 0,
+			  "flow_conservation_" + itos (k) + "_" + itos (q));
+		    }
+		}
+
+	      //distance
+	      GRBLinExpr expr3 = 0.0;
+	      for (i = 0; i < n - 1; i++)
+		for (j = 0; j < n; j++)
+		  expr3 += dis[i][j] * x[i][j][q];
+	      model.addConstr (expr3 <= route.DIS, "distance_" + itos (q));
+
+	      //node degree less than 1
+	      for (int j = 0; j < n - 1; j++)
+		{
+		  GRBLinExpr expr = 0.0;
+		  for (i = 0; i < n - 1; i++)
+		    expr += x[i][j][q];
+		  model.addConstr (expr <= 1,
+				   "indegree_" + itos (j) + "_" + itos (q));
+		}
+
+	      //subtour elimination
+	      for (i = 0; i < n - 1; i++)
+		for (j = 0; j < n; j++)
+		  {
+		    GRBLinExpr expr = 0.0;
+		    expr += s[i][q] - s[j][q] + (n - 1) * x[i][j][q]
+			+ (n - 3) * x[j][i][q];
+		    model.addConstr (
+			expr <= n - 2,
+			"subtour_" + itos (i) + "_" + itos (j) + "_"
+			    + itos (q));
+		  }
+
+	      //arc flow
+	      for (i = 0; i < n - 1; i++)
+		for (j = 0; j < n; j++)
+		  {
+		    GRBLinExpr expr = 0.0;
+
+		    expr += wt[i][j] * y[i][j][q] - theta[i][j][q];
+		    for (k = 0; k < n - 1; k++)
+		      {
+			if (k != ogn)
+			  expr += u[i][k][j][q] + u[k][j][i][q] - u[i][j][k][q];
+			else
+			  expr += u[k][j][i][q];
+		      }
+		    //when k==n-1
+		    if (j != n - 1)
+		      expr += u[i][n - 1][j][q];
+		    model.addConstr (
+			expr == 0,
+			"flow_" + itos (i) + "_" + itos (j) + "_" + itos (q));
+
+		    /*
+		     expr += wt[i][j] * y[i][j][q] - theta[i][j][q];
+		     for (k = 0; k < n; k++)
+		     expr += u[i][k][j][q] + u[k][j][i][q] - u[i][j][k][q];
+		     */
+		  }
+
+	      //arc flow upperbound
+	      for (i = 0; i < n - 1; i++)
+		for (j = 0; j < n; j++)
+		  {
+		    GRBLinExpr expr = 0.0;
+		    expr += theta[i][j][q] - Q * x[i][j][q];
+		    model.addConstr (
+			expr <= 0,
+			"flowBound_" + itos (i) + "_" + itos (j) + "_"
+			    + itos (q));
+		  }
+	    }
+
+	  //one vehicle for one cargo
+	  //if (!ADD_CUTS){}
+	  for (i = 0; i < n - 1; i++)
+	    for (j = 0; j < n; j++)
+	      {
+		GRBLinExpr expr = 0.0;
+		for (q = 0; q < numV; q++)
+		  expr += y[i][j][q];
+		model.addConstr (expr <= 1,
+				 "one-one" + itos (i) + "_" + itos (j));
+	      }
+
+	  //set up objective
+	  GRBLinExpr obj = 0.0;
+	  for (q = 0; q < numV; q++)
+	    {
+	      for (i = 0; i < n - 1; i++)
+		for (j = 0; j < n; j++)
+		  {
+		    obj += price * dis[i][j] * wt[i][j] * y[i][j][q];
+		    obj -= cost * dis[i][j] * theta[i][j][q];
+		    obj -= cost * vw * dis[i][j] * x[i][j][q];
+		  }
+	    }
+
+	  model.setObjective (obj, GRB_MAXIMIZE);
+
+	  //*****************************************************
+	  //use Gurobi MIP starts to set up the initial solution
+	  for (q = 0; q < numV; q++)
+	    for (i = 0; i < n; i++)
+	      {
+		s[i][q].set (GRB_DoubleAttr_Start, sols_best[i][q]);
+		for (j = 0; j < n; j++)
+		  {
+		    x[i][j][q].set (GRB_DoubleAttr_Start, solx_best[i][j][q]);
+		    y[i][j][q].set (GRB_DoubleAttr_Start, soly_best[i][j][q]);
+		    for (k = 0; k < n; k++)
+		      u[i][j][k][q].set (GRB_DoubleAttr_Start,
+					 solu_best[i][j][k][q]);
+		  }
+	      }
+
+	  //set up time limit
+	  model.set (GRB_DoubleParam_TimeLimit, stage2TimeLimit);
+
+	  // Optimize model
+	  model.optimize ();
+
+	  //write model to file
+	  //model.write ("MVBPMP.lp");
+
+	  // Status checking
+	  status = model.get (GRB_IntAttr_Status);
+	  if (status == GRB_INF_OR_UNBD || status == GRB_INFEASIBLE
+	      || status == GRB_UNBOUNDED)
+	    {
+	      cout << "The model cannot be solved "
+		  << "because it is infeasible or unbounded" << endl;
+	      return 1;
+	    }
+	  if (status != GRB_OPTIMAL)
+	    {
+	      cout << "Optimization was stopped with status " << status << endl;
+	      return 1;
+	    }
+
+	  //=====================> READ SOLUTION FROM GUROBI <============================
+	  // Extract solution
+	  if (model.get (GRB_IntAttr_SolCount) > 0)
+	    {
+
+	      double objtemp = model.get (GRB_DoubleAttr_ObjVal);
+	      cout << "OBJ: " << objtemp << endl;
+	      //update LB
+	      bool findBetterLB = false;
+	      if (objtemp > LB)
+		{
+		  LB = objtemp;
+		  cout << "LB is updated." << endl;
+		  findBetterLB = true;
+		}
+
+	      cout << "===> LB = " << LB << endl;
+
+	      //====== start defining solutions for x, y, u, and s ======
+	      double ***solx = new double**[n];	//solution x for LR dual
+	      double ***soly = new double**[n];
+	      double ****solu = new double***[n];
+	      double **sols = new double*[n];
+
+	      for (int i = 0; i < n; i++)
+		{
+		  solx[i] = new double*[n];
+		  soly[i] = new double*[n];
+		  solu[i] = new double**[n];
+		  sols[i] = new double[numV];
+
+		  for (int j = 0; j < n; j++)
+		    {
+		      solx[i][j] = new double[numV];
+		      soly[i][j] = new double[numV];
+		      solu[i][j] = new double*[n];
+
+		      for (int k = 0; k < n; k++)
+			solu[i][j][k] = new double[numV];
+		    }
+		}
+
+	      //====== start reading solutions for x, y, u, and s ======
+	      for (q = 0; q < numV; q++)
+		for (i = 0; i < n; i++)
+		  {
+		    sols[i][q] = s[i][q].get (GRB_DoubleAttr_X);
+		    for (j = 0; j < n; j++)
+		      {
+			solx[i][j][q] = x[i][j][q].get (GRB_DoubleAttr_X);
+			soly[i][j][q] = y[i][j][q].get (GRB_DoubleAttr_X);
+			for (k = 0; k < n; k++)
+			  solu[i][j][k][q] = u[i][j][k][q].get (
+			      GRB_DoubleAttr_X);
+		      }
+		  }
+
+	      //store the solution as the best LB
+	      if (findBetterLB)
+		storeBestLB (solx, soly, solu, sols, solx_best, soly_best,
+			     solu_best, sols_best, n);
+
+	      printf ("Selected arcs: \n");
+	      for (q = 0; q < numV; q++)
+		for (i = 0; i < n; i++)
+		  for (j = 0; j < n; j++)
+		    {
+		      if (solx[i][j][q] > 0.9)
+			printf ("%d -- %d (%d)\n", i + 1, j + 1, q + 1);
+		    }
+
+	      printf ("Selected requests: \n");
+	      for (q = 0; q < numV; q++)
+		for (i = 0; i < n; i++)
+		  for (j = 0; j < n; j++)
+		    {
+		      if (soly[i][j][q] > 0.9)
+			printf ("%d -- %d (%d)\n", i + 1, j + 1, q + 1);
+		    }
+
+	      for (i = 0; i < n; i++)
+		{
+		  for (j = 0; j < n; j++)
+		    {
+		      for (k = 0; k < n; k++)
+			delete[] solu[i][j][k];
+
+		      delete[] solx[i][j];
+		      delete[] soly[i][j];
+		      delete[] solu[i][j];
+		    }
+		  delete[] solx[i];
+		  delete[] soly[i];
+		  delete[] solu[i];
+		  delete[] sols[i];
+		}
+	      delete[] solx;
+	      delete[] soly;
+	      delete[] solu;
+	      delete[] sols;
+	    }
+
+	}
+      catch (GRBException e)
+	{
+	  cout << "Error number: " << e.getErrorCode () << endl;
+	  cout << e.getMessage () << endl;
+	}
+      catch (...)
+	{
+	  cout << "Error during optimization" << endl;
+	}
+      for (i = 0; i < n; i++)
+	{
+	  for (j = 0; j < n; j++)
+	    {
+	      delete[] x[i][j];
+	      delete[] y[i][j];
+	    }
+	  delete[] x[i];
+	  delete[] y[i];
+	}
+      delete[] x;
+      delete[] y;
+      delete env;
+
+      auto endWallClockStage2 = high_resolution_clock::now ();
+
+      auto elapsedWallClockStage2 = duration_cast < std::chrono::nanoseconds
+	  > (endWallClockStage2 - endWallClock);
+
+      auto elapsedWallClockBothStages = duration_cast < std::chrono::nanoseconds
+	  > (endWallClockStage2 - beginWallClock);
+
+      printf ("time_Stage1 = %.3f seconds\n",
+      	      elapsedWallClock.count () * 1e-9);
+
+      printf ("time_Stage2 = %.3f seconds\n",
+	      elapsedWallClockStage2.count () * 1e-9);
+
+      printf ("time_BothStages = %.3f seconds\n",
+	      elapsedWallClockBothStages.count () * 1e-9);
+    }
+
+  //********************************** END of STAGE 2 **********************************
 
   return 0;
 }
