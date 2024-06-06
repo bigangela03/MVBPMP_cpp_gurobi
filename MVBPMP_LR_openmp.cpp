@@ -1369,9 +1369,6 @@ main (int argc, char *argv[])
   printf ("SolutionUB = %lf\n", UB);
   printf ("SolutionGap = %lf\n", (UB - LB) / UB);
 
-  if (!DO_STAGE_TWO)
-    return 0;
-
   //*********************** START STAGE TWO ****************************
   //********************************************************************
   //the model is supposed to be the same with the MVBPMP in LR process
@@ -1379,7 +1376,7 @@ main (int argc, char *argv[])
   //this model in stage two doesn't, but only the initial solution from LR
   //2. this model set up the timeLimit: LR + stage2 = 24 hours
 
-  if (DO_STAGE_TWO)
+  if (DO_STAGE_TWO && !findOptimalSolution)
     {
       double secInStage1 = elapsedWallClock.count () * 1e-9;
       double stage2TimeLimit;
@@ -1794,8 +1791,7 @@ main (int argc, char *argv[])
       auto elapsedWallClockBothStages = duration_cast < std::chrono::nanoseconds
 	  > (endWallClockStage2 - beginWallClock);
 
-      printf ("time_Stage1 = %.3f seconds\n",
-      	      elapsedWallClock.count () * 1e-9);
+      printf ("time_Stage1 = %.3f seconds\n", elapsedWallClock.count () * 1e-9);
 
       printf ("time_Stage2 = %.3f seconds\n",
 	      elapsedWallClockStage2.count () * 1e-9);
