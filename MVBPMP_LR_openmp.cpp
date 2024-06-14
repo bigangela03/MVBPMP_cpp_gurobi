@@ -39,6 +39,10 @@ int NUM_THREADS_VEH = 10; //number of threads for solving each vehicle's BPMP mo
 
 double INITIAL_U_COEFFICIENT;
 
+bool USE_UB_FROM_LR = false;
+//feed the LR solution to Gurobi and find the optimal solution
+bool DO_STAGE_TWO = true;
+
 bool PRINT_x_WHEN_INTEGER_SOL = false;
 bool PRINT_y_WHEN_INTEGER_SOL = false;
 
@@ -49,8 +53,6 @@ bool USE_LR_MULTIPLIER_TYPE_C = true;
 bool PRINT_VAR_VALUR = false;
 bool PRINT_CONFLICT_PICKUP = true;
 bool PRINT_LRmultiplierTypeB_update_process = false;
-//feed the LR solution to Gurobi and find the optimal solution
-bool DO_STAGE_TWO = true;
 
 double bigM = 10000000;
 
@@ -1615,10 +1617,27 @@ main (int argc, char *argv[])
 		  }
 	    }
 
-	  model.setObjective (obj, GRB_MAXIMIZE);
+	  if (USE_UB_FROM_LR)
+	    {
+	      //***************************************************
+	      //Add Extra constrain to use the UB from LB in Gurobi
+	      //This might not work well since B&B tree still needs
+	      //to search all the necessary nodes
+	      //***************************************************
+	      GRBLinExpr exprOBJ = 0.0;
+	      exprOBJ += obj;
+	      model.addConstr (exprOBJ <= UB, "OBJ_upperbound");
+
+	      //set up MIP focus
+	      //If you are more interested in finding feasible solutions quickly, you can select MIPFocus=1.
+	      //If you believe the solver is having no trouble finding good quality solutions, and wish to focus more attention on proving optimality, select MIPFocus=2.
+	      //If the best objective bound is moving very slowly (or not at all), you may want to try MIPFocus=3 to focus on the bound
+	      model.set (GRB_IntParam_MIPFocus, 3);
+	    }
 
 	  //*****************************************************
 	  //use Gurobi MIP starts to set up the initial solution
+	  //*****************************************************
 	  for (q = 0; q < numV; q++)
 	    for (i = 0; i < n; i++)
 	      {
@@ -1632,9 +1651,12 @@ main (int argc, char *argv[])
 					 solu_best[i][j][k][q]);
 		  }
 	      }
-
-	  //set up time limit
+	  //*****************************************************
+	  //set up time limit according to stage 1 (LR) running time
+	  //*****************************************************
 	  model.set (GRB_DoubleParam_TimeLimit, stage2TimeLimit);
+
+	  model.setObjective (obj, GRB_MAXIMIZE);
 
 	  // Optimize model
 	  model.optimize ();
