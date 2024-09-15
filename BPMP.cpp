@@ -1,4 +1,3 @@
-
 #include "gurobi_c++.h"
 #include <cassert>
 #include <cstdlib>
@@ -19,6 +18,10 @@
 
 using namespace std;
 using namespace std::chrono;
+
+//if (d(ik) +d(kj))/d(ij) > price/cost
+//use  cut u(ijk)<=(1-y(ij))*Q
+bool useRatioCuts = true;
 
 string
 itos (int i)
@@ -268,6 +271,29 @@ main (int argc, char *argv[])
 		    model.addConstr (expr <= 0,
 				     "flowBound_" + itos (i) + "_" + itos (j));
 		  }
+
+	      //useRatioCuts
+	      if (useRatioCuts)
+		{
+		  //find triples that (d(ik) +d(kj))/d(ij) > price/cost
+		  for (int i = 0; i < n; i++)
+		    for (int j = 0; j < n; j++)
+		      for (int k = 0; k < n; k++)
+			{
+			  if ((dis[i][k] + dis[k][j]) / dis[i][j]
+			      > price / cost)
+			    {
+			      // u and y can't be positive at the same time
+			      //u(ijk)<=(1-y(ij))*Q
+			      GRBLinExpr expr = 0.0;
+			      expr += u[i][j][k] - (1 - y[i][j]) * Q;
+			      model.addConstr (
+				  expr <= 0,
+				  "ratio-cut_" + itos (i) + "_" + itos (j) + "_"
+				      + itos (k));
+			    }
+			}
+		}
 
 	      //set objective
 	      GRBLinExpr obj = 0.0;
