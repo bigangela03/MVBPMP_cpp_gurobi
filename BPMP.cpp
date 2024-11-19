@@ -16,12 +16,13 @@
 #include <chrono> //to measure run time
 #include "readData.h"
 
+#include <bits/stdc++.h> //to use unordered_set, which is hash set
+
 using namespace std;
 using namespace std::chrono;
 
-//if (d(ik) +d(kj))/d(ij) > price/cost
-//use  cut u(ijk)<=(1-y(ij))*Q
-bool useRatioCuts = true;
+#define EPSILON 0.00001
+double capacity;
 
 string
 itos (int i)
@@ -36,11 +37,16 @@ class printIntSol : public GRBCallback
 public:
   GRBVar **xv;
   GRBVar **yv;
+  GRBVar ***uv;
+  unordered_set<string> ratioSet;
   int n;
-  printIntSol (GRBVar **xvars, GRBVar **yvars, int nvar)
+  printIntSol (GRBVar **xvars, GRBVar **yvars, GRBVar ***uvars,
+	       unordered_set<string> passedSet, int nvar)
   {
     xv = xvars;
     yv = yvars;
+    uv = uvars;
+    ratioSet = passedSet;
     n = nvar;
   }
 protected:
@@ -53,9 +59,19 @@ protected:
 	  {
 	    // Found an integer feasible solution
 	    printf ("\n======> an integer solution found.\n");
-	    int i, j;
+	    int i, j, k;
 	    double **x = new double*[n];
 	    double **y = new double*[n];
+	    double ***u = new double**[n];
+
+	    for (i = 0; i < n; i++)
+	      {
+		u[i] = new double*[n];
+
+		for (j = 0; j < n; j++)
+		  u[i][j] = new double[n];
+	      }
+
 	    printf ("x vars: ");
 	    for (i = 0; i < n; i++)
 	      {
@@ -77,6 +93,43 @@ protected:
 		  }
 	      }
 	    printf ("\n");
+
+	    for (i = 0; i < n; i++)
+	      {
+		for (j = 0; j < n; j++)
+		  {
+		    u[i][j] = getSolution (uv[i][j], n);
+
+		    //for (k = 0; k < n; k++)
+		    //if (u[i][j][k] > EPSILON)
+		    //printf ("u[%d,%d,%d] = %lf", i, j, k, u[i][j][k]);
+		  }
+	      }
+
+	    for (int i = 0; i < n; i++)
+	      for (int j = 0; j < n; j++)
+		for (int k = 0; k < n; k++)
+		  {
+		    string key = itos (i) + "," + itos (j) + "," + itos (k);
+
+		    if (u[i][j][k] > EPSILON && y[i][j] > 0.5
+			&& (ratioSet.find (key) != ratioSet.end ()))
+		      {
+			//cout << key << " found" << endl;
+			//exit (1);
+
+			// u and y can't be positive at the same time
+			//u(ijk)<=(1-y(ij))*Q
+
+			GRBLinExpr expr = 0.0;
+			expr += u[i][j][k] - (1 - y[i][j]) * capacity;
+
+			addLazy (expr <= 0);
+			printf (
+			    "*** price cost ratio cut is added for (%d %d %d)***\n",
+			    i, j, k);
+		      }
+		  }
 	  }
       }
     catch (GRBException e)
@@ -130,6 +183,7 @@ main (int argc, char *argv[])
 	  double cost = route.travelCost;
 	  double vw = route.vehicleWeight;
 	  double Q = route.totalCapacity;
+	  capacity = Q;
 
 	  //start calling Gurobi
 	  int i;
@@ -137,16 +191,22 @@ main (int argc, char *argv[])
 	  GRBEnv *env = NULL;
 	  GRBVar **x = NULL;
 	  GRBVar **y = NULL;
+
 	  GRBVar s[n];
-	  GRBVar u[n][n][n];
+	  //GRBVar u[n][n][n];
+	  GRBVar ***u = NULL;
 	  GRBVar theta[n][n];
 
 	  x = new GRBVar*[n];
 	  y = new GRBVar*[n];
+	  u = new GRBVar**[n];
 	  for (i = 0; i < n; i++)
 	    {
 	      x[i] = new GRBVar[n];
 	      y[i] = new GRBVar[n];
+	      u[i] = new GRBVar*[n];
+	      for (int j = 0; j < n; j++)
+		u[i][j] = new GRBVar[n];
 	    }
 
 	  try
@@ -155,9 +215,6 @@ main (int argc, char *argv[])
 
 	      env = new GRBEnv ();
 	      GRBModel model = GRBModel (*env);
-
-	      // Must set LazyConstraints parameter when using lazy constraints
-	      model.set (GRB_IntParam_LazyConstraints, 1);
 
 	      // Create binary decision variables
 	      for (i = 0; i < n; i++)
@@ -272,29 +329,6 @@ main (int argc, char *argv[])
 				     "flowBound_" + itos (i) + "_" + itos (j));
 		  }
 
-	      //useRatioCuts
-	      if (useRatioCuts)
-		{
-		  //find triples that (d(ik) +d(kj))/d(ij) > price/cost
-		  for (int i = 0; i < n; i++)
-		    for (int j = 0; j < n; j++)
-		      for (int k = 0; k < n; k++)
-			{
-			  if ((dis[i][k] + dis[k][j]) / dis[i][j]
-			      > price / cost)
-			    {
-			      // u and y can't be positive at the same time
-			      //u(ijk)<=(1-y(ij))*Q
-			      GRBLinExpr expr = 0.0;
-			      expr += u[i][j][k] - (1 - y[i][j]) * Q;
-			      model.addConstr (
-				  expr <= 0,
-				  "ratio-cut_" + itos (i) + "_" + itos (j) + "_"
-				      + itos (k));
-			    }
-			}
-		}
-
 	      //set objective
 	      GRBLinExpr obj = 0.0;
 	      for (i = 0; i < n - 1; i++)
@@ -310,9 +344,59 @@ main (int argc, char *argv[])
 	      printf ("cost = %lf\n", cost);
 	      printf ("vw = %lf\n", vw);
 
-	      // Set callback function
-	      printIntSol cb = printIntSol (x, y, n);
-	      model.setCallback (&cb);
+	      //useRatioCuts
+	      //find triples that (d(ik) +d(kj))/d(ij) > price/cost
+
+	      double ratio;
+	      //ratio = price / cost;
+	      ratio = 2.8;
+	      cout << "ratio = " << ratio << endl;
+	      unordered_set < string > ratioSet;
+
+	      for (int i = 0; i < n; i++)
+		for (int j = 0; j < n; j++)
+		  for (int k = 0; k < n; k++)
+		    {
+		      if (i != j && i != k && k != j)
+			{
+			  if ((dis[i][k] + dis[k][j]) / dis[i][j] > ratio)
+			    {
+			      // u and y can't be positive at the same time
+			      //u(ijk)<=(1-y(ij))*Q
+
+			      GRBLinExpr expr = 0.0;
+			      expr += u[i][j][k] - (1 - y[i][j]) * Q;
+			      model.addConstr (
+				  expr <= 0,
+				  "ratio-cut_" + itos (i) + "_" + itos (j) + "_"
+				      + itos (k));
+
+			      //put the found triples indices into Hash set
+			      //cout << (dis[i][k] + dis[k][j]) / dis[i][j] << endl;
+			      string tripleIndex = itos (i) + "," + itos (j)
+				  + "," + itos (k);
+
+			      ratioSet.insert (tripleIndex);
+			    }
+			}
+		    }
+	      cout << "ratioSet size = " << ratioSet.size () << endl;
+	      //exit (1);
+	      /*
+	       for (const auto &elem : ratioSet)
+	       {
+	       cout << elem << endl;
+	       }
+	       */
+
+	      //****** Must set LazyConstraints parameter when using lazy constraints
+	      //1 means use lazy constraint; 0 means not using lazy constraints
+	      model.set (GRB_IntParam_LazyConstraints, 0);
+	      //model.set (GRB_IntParam_LazyConstraints, 1);
+
+	      //****** Set callback function
+	      //printIntSol cb = printIntSol (x, y, u, ratioSet, n);
+	      //model.setCallback (&cb);
 
 	      // Optimize model
 	      model.optimize ();
