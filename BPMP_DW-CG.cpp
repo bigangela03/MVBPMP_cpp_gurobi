@@ -1,7 +1,7 @@
-//This is an example from https://groups.google.com/g/gurobi/c/pkBNfu-iX0k
+// This is an example from https://groups.google.com/g/gurobi/c/pkBNfu-iX0k
 
 //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-//although we read vehicle data, we only consider the route from 0 to n-1 right now
+// although we read vehicle data, we only consider one vehicle scenario whose route is from 0 to n-1 right now
 
 #include "gurobi_c++.h"
 #include <cassert>
@@ -9,7 +9,7 @@
 #include <cmath>
 #include <sstream>
 #include <iostream> //input and output
-#include <fstream>  //read file
+#include <fstream>	//read file
 #include <sstream>
 #include <algorithm>
 #include <vector>
@@ -23,515 +23,549 @@
 #include <iomanip>
 
 #include "readData.h"
+// #include "ga_objfunc_greedy.h"
+#include "ga.h"
 
-#include <omp.h>
+// #include <omp.h>
 
 using namespace std;
 using namespace std::chrono;
 using namespace std::string_literals;
-//to generate vehicle data file name
+// to generate vehicle data file name
 
-int numV = 3; //number of vehicles; will be overwritten when reading vehicle file
-//number of nodes in instance
-//in main(), we also use n to present number of nodes
-//since it's easy to read variables with short subscript, like x[n][n][numV]
+int numV = 3; // number of vehicles; will be overwritten when reading vehicle file
+// number of nodes in instance
+// in main(), we also use n to present number of nodes
+// since it's easy to read variables with short subscript, like x[n][n][numV]
 int NUM_NODES;
 
 bool PRINT_FOR_DEBUG = false;
 
+bool USE_GA_FOR_INIT_SOL = true;
+
 double bigM = 10000000;
-double epsilon = numeric_limits<double>::epsilon ();
+double epsilon = numeric_limits<double>::epsilon();
 
-string
-itos (int i)
+double distanceLimit = 20;
+
+// itos is defined in ga.h as well
+//  string
+//  itos(int i)
+//  {
+//  	stringstream s;
+//  	s << i;
+//  	return s.str();
+//  }
+
+int main(int argc, char *argv[])
 {
-  stringstream s;
-  s << i;
-  return s.str ();
-}
 
-int
-main (int argc, char *argv[])
-{
-
-  //********* only read graph info and vehicle info by arguments
-  //********* doesn't go through the graph info in the data folder
-  if (argc != 4)
-    {
-      cout
-	  << "Usage: ./bpmp_dw-cg.x nodesDataNameAndPath numberOfVehicles vehicleDataNameAndPath"
-	  << endl;
-      return 1;
-    }
-
-  if (argc == 4)
-    {
-      cout << "Nodes Data: " << argv[1] << endl;
-      cout << "Number of Vehicles: " << argv[2] << endl;
-      cout << "Vehicles Data: " << argv[3] << endl;
-      numV = stoi (argv[2]);
-    }
-
-  clock_t beginTime, endTimeOfLastIteration;
-
-  auto beginWallClock = high_resolution_clock::now ();
-  auto endTimeOfLastIterationWallClock = high_resolution_clock::now ();
-
-  readData route;
-
-  string filename = argv[1];
-  printf ("reading file %s ...\n", filename.c_str ());
-  route.readSingleFile (filename);
-
-  //route.printStats();
-  //route.printData ();
-
-  int n = route.numOfNode;
-  NUM_NODES = route.numOfNode;
-
-  double wt[n][n];
-  double dis[n][n];
-  for (int i = 1; i <= n; i++)
-    for (int j = 1; j <= n; j++)
-      {
-	wt[i - 1][j - 1] = route.w[i][j];
-	dis[i - 1][j - 1] = route.d[i][j];
-      }
-  double price = route.priceCharged;
-  double cost = route.travelCost;
-  double vw = route.vehicleWeight;
-  double Q = route.totalCapacity;
-
-  //==============reading vehicle info==============
-  string vehicleFileName = argv[3];
-
-  printf ("reading vehicle file: %s ...\n", vehicleFileName.c_str ());
-  //exit (1);
-  route.readSingleVehicleFile (vehicleFileName, numV);
-
-  //vehicle and origin always starts from 0
-  int vehicle[numV];
-  int origin[numV];
-
-  printf ("vehicles (start from 0):\n");
-  for (int i = 0; i < numV; i++)
-    {
-      vehicle[i] = route.vehicle[i];
-      printf ("%d ", vehicle[i]);
-    }
-  printf ("\norigins (start from 0):\n");
-  for (int i = 0; i < numV; i++)
-    {
-      origin[i] = route.origin[i];
-      printf ("%d ", origin[i]);
-    }
-  printf ("\n");
-
-  //================> end of reading data <================
-
-  GRBEnv *env = 0;
-
-  try
-    {
-      int i, j, k;
-
-      //Patterns
-      //double pat[][2];
-
-      //****** newCol[n-1][j]=0 and newCol[i][0]=0
-      double **newCol = new double*[n];
-      for (i = 0; i < n; i++)
-	newCol[i] = new double[n];
-
-      for (i = 0; i < n; i++)
+	//********* only read graph info and vehicle info by arguments
+	//********* doesn't go through the graph info in the data folder
+	if (argc != 4)
 	{
-	  newCol[n - 1][i] = 0;
-	  newCol[i][0] = 0;
-
-	  for (j = 0; j < n; j++)
-	    newCol[i][j] = 0;
+		cout
+			<< "Usage: ./bpmp_dw-cg.x nodesDataNameAndPath numberOfVehicles vehicleDataNameAndPath"
+			<< endl;
+		return 1;
 	}
 
-      //****** initial route solution
-      newCol[0][n - 1] = 1;
-
-      if (PRINT_FOR_DEBUG)
+	if (argc == 4)
 	{
-	  cout << "initial patterns \n";
-	  for (i = 0; i < n; i++)
-	    {
-	      for (j = 0; j < n; j++)
-		cout << newCol[i][j] << "  ";
-	      cout << "" << endl;
-	    }
+		cout << "Nodes Data: " << argv[1] << endl;
+		cout << "Number of Vehicles: " << argv[2] << endl;
+		cout << "Vehicles Data: " << argv[3] << endl;
+		numV = stoi(argv[2]);
 	}
 
-      env = new GRBEnv ();
-      GRBModel Master = GRBModel (*env);
+	clock_t beginTime, endTimeOfLastIteration;
 
-      //****** Variables of master problem
-      //*** set up var lambda
-      vector < GRBVar > lambda;
-      lambda.push_back (
-	  Master.addVar (0.0, GRB_INFINITY, 0.0, GRB_CONTINUOUS,
-			 "lambda_" + itos (0)));
-      if (PRINT_FOR_DEBUG)
-	cout << "variable lambda is added \n";
+	auto beginWallClock = high_resolution_clock::now();
+	auto endTimeOfLastIterationWallClock = high_resolution_clock::now();
 
-      //*** set up var y and triples variable z
-      GRBVar **y = NULL;
-      GRBVar ***z = NULL;
-      y = new GRBVar*[n];
-      z = new GRBVar**[n];
-      for (i = 0; i < n; i++)
+	readData route;
+
+	string filename = argv[1];
+	printf("reading file %s ...\n", filename.c_str());
+	route.readSingleFile(filename);
+
+	// route.printStats();
+	// route.printData ();
+
+	int n = route.numOfNode;
+	NUM_NODES = route.numOfNode;
+
+	// double wt[n][n];
+	// double dis_v[n][n];
+
+	double **wt = new double *[n];
+	double **dis_v = new double *[n];
+
+	for (int i = 0; i < n; i++)
 	{
-	  y[i] = new GRBVar[n];
-	  z[i] = new GRBVar*[n];
-	  for (int j = 0; j < n; j++)
-	    z[i][j] = new GRBVar[n];
+		wt[i] = new double[n];
+		dis_v[i] = new double[n];
 	}
 
-      for (i = 0; i < n; i++)
-	for (j = 0; j < n; j++)
-	  {
-	    //y[i][j] = Master.addVar (0.0, 1.0, 0, GRB_BINARY, "y_" + itos (i) + "_" + itos (j));
-	    y[i][j] = Master.addVar (0.0, 1.0, 0, GRB_CONTINUOUS,
-				     "y_" + itos (i) + "_" + itos (j));
-	    for (k = 0; k < n; k++)
-	      {
-		string s = "z_" + itos (i) + "_" + itos (j) + "_" + itos (k);
-		//*** in DW-CG, we force u<=Q (Q is the vehicle's capacity)
-		z[i][j][k] = Master.addVar (0.0, Q, 0.0, GRB_CONTINUOUS, s);
-	      }
-	  }
-      if (PRINT_FOR_DEBUG)
-	cout << "variable y and z are added \n";
-
-      for (i = 0; i < n; i++)
-	{
-	  y[i][i].set (GRB_DoubleAttr_UB, 0);
-	  y[i][0].set (GRB_DoubleAttr_UB, 0);
-	  y[n - 1][i].set (GRB_DoubleAttr_UB, 0);
-
-	  for (j = 0; j < n; j++)
-	    {
-	      z[i][j][0].set (GRB_DoubleAttr_UB, 0);
-	      z[i][j][n - 1].set (GRB_DoubleAttr_UB, 0);
-	      z[i][0][j].set (GRB_DoubleAttr_UB, 0);
-	      z[n - 1][i][j].set (GRB_DoubleAttr_UB, 0);
-	    }
-	}
-
-      //Constraints of master problem!
-
-      GRBConstr **arcFlowCapacity = new GRBConstr*[n];
-      for (i = 0; i < n; i++)
-	arcFlowCapacity[i] = new GRBConstr[n];
-
-      for (i = 0; i < n; i++)
-	for (j = 0; j < n; j++)
-	  {
-	    GRBLinExpr expr = 0.0;
-
-	    expr += wt[i][j] * y[i][j];
-
-	    for (k = 0; k < n; k++)
-	      expr += z[i][k][j] + z[k][j][i] - z[i][j][k];
-
-	    expr -= Q * newCol[i][j] * lambda[0];
-
-	    arcFlowCapacity[i][j] = Master.addConstr (
-		expr <= 0, "arcFlowCap_" + itos (i) + "_" + itos (j));
-	  }
-
-      GRBConstr *lambdaSum = new GRBConstr[1];
-      GRBLinExpr expr = 0.0;
-      expr += lambda[0];
-      lambdaSum[0] = Master.addConstr (expr == 1, "lambdaSum");
-
-      if (PRINT_FOR_DEBUG)
-	cout << "constraints added! \n";
-
-      //set objective
-      GRBLinExpr obj = 0.0;
-      for (i = 0; i < n; i++)
-	for (j = 1; j < n; j++)
-	  {
-	    obj += (price - cost) * dis[i][j] * wt[i][j] * y[i][j];
-	    obj -= cost * vw * dis[i][j] * newCol[i][j] * lambda[0];
-	  }
-
-      for (i = 0; i < n; i++)
-	for (j = 0; j < n; j++)
-	  for (k = 0; k < n; k++)
-	    obj -= (dis[i][k] + dis[k][j] - dis[i][j]) * z[i][j][k];
-
-      Master.setObjective (obj, GRB_MAXIMIZE);
-
-      int itrNum = 1;
-
-      double convergePoint = -100;
-      double PPobj = -100;
-
-      while (true)
-	{
-	  printf ("======== Iteration %d ========\n", itrNum);
-
-	  //*** the model is empty after I use model.relax()
-	  //GRBModel relax = Master.relax ();
-	  //relax.write ("dw-cg-relax.lp");
-	  //relax.optimize ();
-
-	  Master.write ("dw-cg-master.lp");
-	  Master.getEnv ().set (GRB_IntParam_OutputFlag, 0); //Silent Mode
-	  Master.optimize ();
-
-	  if (PRINT_FOR_DEBUG)
-	    cout << "Master solved! \n";
-
-	  double objValue_master = Master.get (GRB_DoubleAttr_ObjVal);
-	  cout << "objective of Master problem: " << objValue_master << "\n";
-
-	  double pi[n][n];
-
-	  for (i = 0; i < n; i++)
-	    for (j = 0; j < n; j++)
-	      pi[i][j] = arcFlowCapacity[i][j].get (GRB_DoubleAttr_Pi);
-
-	  if (PRINT_FOR_DEBUG)
-	    {
-	      for (i = 0; i < n; i++)
+	for (int i = 1; i <= n; i++)
+		for (int j = 1; j <= n; j++)
 		{
-		  for (j = 0; j < n; j++)
-		    cout << pi[i][j] << ", ";
-		  cout << endl;
+			wt[i - 1][j - 1] = route.w[i][j];
+			dis_v[i - 1][j - 1] = route.d[i][j];
 		}
-	    }
+	double price = route.priceCharged;
+	double cost = route.travelCost;
+	double vw = route.vehicleWeight;
+	double capacity = route.totalCapacity;
 
-	  double pi_lambda_sum = lambdaSum[0].get (GRB_DoubleAttr_Pi);
+	//==============reading vehicle info==============
+	string vehicleFileName = argv[3];
 
-	  if (PRINT_FOR_DEBUG)
-	    cout << "pi_lambda dual " << pi_lambda_sum << endl;
+	printf("reading vehicle file: %s ...\n", vehicleFileName.c_str());
+	// exit (1);
+	route.readSingleVehicleFile(vehicleFileName, numV);
 
-	  //================> Pricing Problem <================
-	  if (PRINT_FOR_DEBUG)
-	    cout << "Start Pricing Problem \n";
+	// vehicle and origin always starts from 0
+	int vehicle[numV];
+	int origin[numV];
 
-	  GRBModel PPmodel = GRBModel (*env);
-	  //PP.set (GRB_IntAttr_ModelSense, -1);
+	printf("vehicles (start from 0):\n");
+	for (int i = 0; i < numV; i++)
+	{
+		vehicle[i] = route.vehicle[i];
+		printf("%d ", vehicle[i]);
+	}
+	printf("\norigins (start from 0):\n");
+	for (int i = 0; i < numV; i++)
+	{
+		origin[i] = route.origin[i];
+		printf("%d ", origin[i]);
+	}
+	printf("\n");
 
-	  GRBVar **x = NULL;
-	  GRBVar s[n];
+	//================> end of reading data <================
 
-	  x = new GRBVar*[n];
-	  for (i = 0; i < n; i++)
-	    x[i] = new GRBVar[n];
+	GRBEnv *env = 0;
 
-	  for (i = 0; i < n; i++)
-	    {
-	      s[i] = PPmodel.addVar (0.0, n, 0.0, GRB_CONTINUOUS,
-				     "s_" + itos (i));
-	      for (j = 0; j < n; j++)
-		x[i][j] = PPmodel.addVar (0.0, 1.0, 0, GRB_BINARY,
-					  "x_" + itos (i) + "_" + itos (j));
-	    }
+	try
+	{
+		int i, j, k;
 
-	  for (i = 0; i < n; i++)
-	    {
-	      x[i][i].set (GRB_DoubleAttr_UB, 0);
-	      x[i][0].set (GRB_DoubleAttr_UB, 0);
-	      x[n - 1][i].set (GRB_DoubleAttr_UB, 0);
-	    }
+		// Patterns
+		// double pat[][2];
 
-	  if (PRINT_FOR_DEBUG)
-	    cout << "PP variables added! \n";
+		//****** newCol[n-1][j]=0 and newCol[i][0]=0
+		double **newCol = new double *[n];
+		for (i = 0; i < n; i++)
+			newCol[i] = new double[n];
 
-	  //vehicle goes out of node 1
-	  GRBLinExpr expr1 = 0.0;
-	  for (i = 1; i < n; i++)
-	    expr1 += x[0][i];
-	  PPmodel.addConstr (expr1 == 1, "origin");
+		for (i = 0; i < n; i++)
+		{
+			newCol[n - 1][i] = 0;
+			newCol[i][0] = 0;
 
-	  //vehicle goes back to node n
-	  GRBLinExpr expr2 = 0.0;
-	  for (i = 0; i < n - 1; i++)
-	    expr2 += x[i][n - 1];
-	  PPmodel.addConstr (expr2 == 1, "destination");
+			for (j = 0; j < n; j++)
+				newCol[i][j] = 0;
+		}
 
-	  //flow conservation
-	  for (int k = 1; k < n - 1; k++)
-	    {
-	      GRBLinExpr expr = 0;
-	      for (i = 0; i < n - 1; i++)
-		expr += x[i][k];
-	      for (j = 1; j < n; j++)
-		expr -= x[k][j];
-	      PPmodel.addConstr (expr == 0, "flow_conservation_" + itos (k));
-	    }
+		//======> initial route solution <======
+		cout << "before using ga" << endl;
+		if (USE_GA_FOR_INIT_SOL)
+		{
+			// right now it only returns the selected route, no customers and profit info
+			vector<int> finalRoute = runga(n, price, cost, capacity, distanceLimit, vw, wt, dis_v);
 
-	  //distance
-	  GRBLinExpr expr3 = 0.0;
-	  for (i = 0; i < n - 1; i++)
-	    for (j = 1; j < n; j++)
-	      expr3 += dis[i][j] * x[i][j];
-	  PPmodel.addConstr (expr3 <= route.DIS, "distance");
+			cout << "========> selected route using genetic algorithm:" << endl;
+			for (int i : finalRoute)
+				cout << i << ",";
+			cout << endl;
 
-	  //node degree less than 1
-	  for (int k = 1; k < n - 1; k++)
-	    {
-	      GRBLinExpr expr = 0.0;
-	      for (i = 0; i < n - 1; i++)
-		expr += x[i][k];
-	      PPmodel.addConstr (expr <= 1, "indegree_" + itos (k));
-	    }
+			for (i = 0; i < finalRoute.size() - 1; i++)
+				newCol[finalRoute[i]][finalRoute[i + 1]] = 1;
+		}
+		else
+		{
+			newCol[0][n - 1] = 1;
+		}
+		//======> end of initial route selection <======
 
-	  //subtour elimination
-	  for (i = 0; i < n - 1; i++)
-	    for (j = 1; j < n; j++)
-	      {
+		if (PRINT_FOR_DEBUG)
+		{
+			cout << "initial patterns \n";
+			for (i = 0; i < n; i++)
+			{
+				for (j = 0; j < n; j++)
+					cout << newCol[i][j] << "  ";
+				cout << "" << endl;
+			}
+		}
+
+		env = new GRBEnv();
+		GRBModel Master = GRBModel(*env);
+
+		//****** Variables of master problem
+		//*** set up var lambda
+		vector<GRBVar> lambda;
+		lambda.push_back(
+			Master.addVar(0.0, GRB_INFINITY, 0.0, GRB_CONTINUOUS,
+						  "lambda_" + itos(0)));
+		if (PRINT_FOR_DEBUG)
+			cout << "variable lambda is added \n";
+
+		//*** set up var y and triples variable z
+		GRBVar **y = NULL;
+		GRBVar ***z = NULL;
+		y = new GRBVar *[n];
+		z = new GRBVar **[n];
+		for (i = 0; i < n; i++)
+		{
+			y[i] = new GRBVar[n];
+			z[i] = new GRBVar *[n];
+			for (int j = 0; j < n; j++)
+				z[i][j] = new GRBVar[n];
+		}
+
+		for (i = 0; i < n; i++)
+			for (j = 0; j < n; j++)
+			{
+				// y[i][j] = Master.addVar (0.0, 1.0, 0, GRB_BINARY, "y_" + itos (i) + "_" + itos (j));
+				y[i][j] = Master.addVar(0.0, 1.0, 0, GRB_CONTINUOUS,
+										"y_" + itos(i) + "_" + itos(j));
+				for (k = 0; k < n; k++)
+				{
+					string s = "z_" + itos(i) + "_" + itos(j) + "_" + itos(k);
+					//*** in DW-CG, we force u<=Q (Q is the vehicle's capacity)
+					z[i][j][k] = Master.addVar(0.0, Q, 0.0, GRB_CONTINUOUS, s);
+				}
+			}
+		if (PRINT_FOR_DEBUG)
+			cout << "variable y and z are added \n";
+
+		for (i = 0; i < n; i++)
+		{
+			y[i][i].set(GRB_DoubleAttr_UB, 0);
+			y[i][0].set(GRB_DoubleAttr_UB, 0);
+			y[n - 1][i].set(GRB_DoubleAttr_UB, 0);
+
+			for (j = 0; j < n; j++)
+			{
+				z[i][j][0].set(GRB_DoubleAttr_UB, 0);
+				z[i][j][n - 1].set(GRB_DoubleAttr_UB, 0);
+				z[i][0][j].set(GRB_DoubleAttr_UB, 0);
+				z[n - 1][i][j].set(GRB_DoubleAttr_UB, 0);
+			}
+		}
+
+		// Constraints of master problem!
+
+		GRBConstr **arcFlowCapacity = new GRBConstr *[n];
+		for (i = 0; i < n; i++)
+			arcFlowCapacity[i] = new GRBConstr[n];
+
+		for (i = 0; i < n; i++)
+			for (j = 0; j < n; j++)
+			{
+				GRBLinExpr expr = 0.0;
+
+				expr += wt[i][j] * y[i][j];
+
+				for (k = 0; k < n; k++)
+					expr += z[i][k][j] + z[k][j][i] - z[i][j][k];
+
+				expr -= Q * newCol[i][j] * lambda[0];
+
+				arcFlowCapacity[i][j] = Master.addConstr(
+					expr <= 0, "arcFlowCap_" + itos(i) + "_" + itos(j));
+			}
+
+		GRBConstr *lambdaSum = new GRBConstr[1];
 		GRBLinExpr expr = 0.0;
-		expr += s[i] - s[j] + (n - 1) * x[i][j] + (n - 3) * x[j][i];
-		PPmodel.addConstr (expr <= n - 2,
-				   "s_" + itos (i) + "_" + itos (j));
-	      }
+		expr += lambda[0];
+		lambdaSum[0] = Master.addConstr(expr == 1, "lambdaSum");
 
-	  if (PRINT_FOR_DEBUG)
-	    cout << "PP constraints added! \n";
+		if (PRINT_FOR_DEBUG)
+			cout << "constraints added! \n";
 
-	  //set objective
-	  GRBLinExpr obj = 0.0;
-	  for (i = 0; i < n - 1; i++)
-	    for (j = 1; j < n; j++)
-	      {
-		obj -= cost * vw * dis[i][j] * x[i][j];
-		obj += Q * pi[i][j] * x[i][j];
-	      }
-	  obj -= pi_lambda_sum;
-	  PPmodel.setObjective (obj, GRB_MAXIMIZE);
+		// set objective
+		GRBLinExpr obj = 0.0;
+		for (i = 0; i < n; i++)
+			for (j = 1; j < n; j++)
+			{
+				obj += (price - cost) * dis_v[i][j] * wt[i][j] * y[i][j];
+				obj -= cost * vw * dis_v[i][j] * newCol[i][j] * lambda[0];
+			}
 
-	  if (PRINT_FOR_DEBUG)
-	    cout << "PP objective function is set up! \n";
+		for (i = 0; i < n; i++)
+			for (j = 0; j < n; j++)
+				for (k = 0; k < n; k++)
+					obj -= (dis_v[i][k] + dis_v[k][j] - dis_v[i][j]) * z[i][j][k];
 
-	  PPmodel.getEnv ().set (GRB_IntParam_OutputFlag, 0); //Silent Mode
-	  PPmodel.write ("DW_pricingModel.lp");
-	  PPmodel.optimize ();
+		Master.setObjective(obj, GRB_MAXIMIZE);
 
-	  double objValue_PP = PPmodel.get (GRB_DoubleAttr_ObjVal);
-	  cout << "objective of PP problem: " << objValue_PP << "\n";
+		int itrNum = 1;
 
-	  if (objValue_PP < 0.000001)
-	    {
-	      cout << "Optimum Found!" << endl;
+		double convergePoint = -100;
+		double PPobj = -100;
 
-	      convergePoint = objValue_master;
-	      PPobj = objValue_PP;
-
-	      break;
-	    }
-
-	  if (PPmodel.get (GRB_IntAttr_SolCount) > 0)
-	    {
-	      // Extract solution and create new column
-	      GRBColumn col;
-
-	      double **sol = new double*[n];
-
-	      //make a new column in arc flow capacity constraint
-	      for (i = 0; i < n; i++)
+		while (true)
 		{
-		  sol[i] = PPmodel.get (GRB_DoubleAttr_X, x[i], n);
-		  for (j = 0; j < n; j++)
-		    if (sol[i][j] > 0.999 && sol[i][j] < 1.001)
-		      col.addTerm (-Q, arcFlowCapacity[i][j]);
+			printf("======== Iteration %d ========\n", itrNum);
+
+			//*** the model is empty after I use model.relax()
+			// GRBModel relax = Master.relax ();
+			// relax.write ("dw-cg-relax.lp");
+			// relax.optimize ();
+
+			Master.write("dw-cg-master.lp");
+			Master.getEnv().set(GRB_IntParam_OutputFlag, 0); // Silent Mode
+			Master.optimize();
+
+			if (PRINT_FOR_DEBUG)
+				cout << "Master solved! \n";
+
+			double objValue_master = Master.get(GRB_DoubleAttr_ObjVal);
+			cout << "objective of Master problem: " << objValue_master << "\n";
+
+			double pi[n][n];
+
+			for (i = 0; i < n; i++)
+				for (j = 0; j < n; j++)
+					pi[i][j] = arcFlowCapacity[i][j].get(GRB_DoubleAttr_Pi);
+
+			if (PRINT_FOR_DEBUG)
+			{
+				for (i = 0; i < n; i++)
+				{
+					for (j = 0; j < n; j++)
+						cout << pi[i][j] << ", ";
+					cout << endl;
+				}
+			}
+
+			double pi_lambda_sum = lambdaSum[0].get(GRB_DoubleAttr_Pi);
+
+			if (PRINT_FOR_DEBUG)
+				cout << "pi_lambda dual " << pi_lambda_sum << endl;
+
+			//================> Pricing Problem <================
+			if (PRINT_FOR_DEBUG)
+				cout << "Start Pricing Problem \n";
+
+			GRBModel PPmodel = GRBModel(*env);
+			// PP.set (GRB_IntAttr_ModelSense, -1);
+
+			GRBVar **x = NULL;
+			GRBVar s[n];
+
+			x = new GRBVar *[n];
+			for (i = 0; i < n; i++)
+				x[i] = new GRBVar[n];
+
+			for (i = 0; i < n; i++)
+			{
+				s[i] = PPmodel.addVar(0.0, n, 0.0, GRB_CONTINUOUS,
+									  "s_" + itos(i));
+				for (j = 0; j < n; j++)
+					x[i][j] = PPmodel.addVar(0.0, 1.0, 0, GRB_BINARY,
+											 "x_" + itos(i) + "_" + itos(j));
+			}
+
+			for (i = 0; i < n; i++)
+			{
+				x[i][i].set(GRB_DoubleAttr_UB, 0);
+				x[i][0].set(GRB_DoubleAttr_UB, 0);
+				x[n - 1][i].set(GRB_DoubleAttr_UB, 0);
+			}
+
+			if (PRINT_FOR_DEBUG)
+				cout << "PP variables added! \n";
+
+			// vehicle goes out of node 1
+			GRBLinExpr expr1 = 0.0;
+			for (i = 1; i < n; i++)
+				expr1 += x[0][i];
+			PPmodel.addConstr(expr1 == 1, "origin");
+
+			// vehicle goes back to node n
+			GRBLinExpr expr2 = 0.0;
+			for (i = 0; i < n - 1; i++)
+				expr2 += x[i][n - 1];
+			PPmodel.addConstr(expr2 == 1, "destination");
+
+			// flow conservation
+			for (int k = 1; k < n - 1; k++)
+			{
+				GRBLinExpr expr = 0;
+				for (i = 0; i < n - 1; i++)
+					expr += x[i][k];
+				for (j = 1; j < n; j++)
+					expr -= x[k][j];
+				PPmodel.addConstr(expr == 0, "flow_conservation_" + itos(k));
+			}
+
+			// distance
+			GRBLinExpr expr3 = 0.0;
+			for (i = 0; i < n - 1; i++)
+				for (j = 1; j < n; j++)
+					expr3 += dis_v[i][j] * x[i][j];
+			PPmodel.addConstr(expr3 <= route.DIS, "distance");
+
+			// node degree less than 1
+			for (int k = 1; k < n - 1; k++)
+			{
+				GRBLinExpr expr = 0.0;
+				for (i = 0; i < n - 1; i++)
+					expr += x[i][k];
+				PPmodel.addConstr(expr <= 1, "indegree_" + itos(k));
+			}
+
+			// subtour elimination
+			for (i = 0; i < n - 1; i++)
+				for (j = 1; j < n; j++)
+				{
+					GRBLinExpr expr = 0.0;
+					expr += s[i] - s[j] + (n - 1) * x[i][j] + (n - 3) * x[j][i];
+					PPmodel.addConstr(expr <= n - 2,
+									  "s_" + itos(i) + "_" + itos(j));
+				}
+
+			if (PRINT_FOR_DEBUG)
+				cout << "PP constraints added! \n";
+
+			// set objective
+			GRBLinExpr obj = 0.0;
+			for (i = 0; i < n - 1; i++)
+				for (j = 1; j < n; j++)
+				{
+					obj -= cost * vw * dis_v[i][j] * x[i][j];
+					obj += Q * pi[i][j] * x[i][j];
+				}
+			obj -= pi_lambda_sum;
+			PPmodel.setObjective(obj, GRB_MAXIMIZE);
+
+			if (PRINT_FOR_DEBUG)
+				cout << "PP objective function is set up! \n";
+
+			PPmodel.getEnv().set(GRB_IntParam_OutputFlag, 0); // Silent Mode
+			PPmodel.write("DW_pricingModel.lp");
+			PPmodel.optimize();
+
+			double objValue_PP = PPmodel.get(GRB_DoubleAttr_ObjVal);
+			cout << "objective of PP problem: " << objValue_PP << "\n";
+
+			if (objValue_PP < 0.000001)
+			{
+				cout << "Optimum Found!" << endl;
+
+				convergePoint = objValue_master;
+				PPobj = objValue_PP;
+
+				break;
+			}
+
+			if (PPmodel.get(GRB_IntAttr_SolCount) > 0)
+			{
+				// Extract solution and create new column
+				GRBColumn col;
+
+				double **sol = new double *[n];
+
+				// make a new column in arc flow capacity constraint
+				for (i = 0; i < n; i++)
+				{
+					sol[i] = PPmodel.get(GRB_DoubleAttr_X, x[i], n);
+					for (j = 0; j < n; j++)
+						if (sol[i][j] > 0.999 && sol[i][j] < 1.001)
+							col.addTerm(-Q, arcFlowCapacity[i][j]);
+				}
+
+				if (PRINT_FOR_DEBUG)
+				{
+					printf("Selected arcs: \n");
+					for (i = 0; i < n; i++)
+						for (j = 0; j < n; j++)
+							if (sol[i][j] > 0.999 && sol[i][j] < 1.001)
+								printf("sol[%d][%d]= %lf,  %d -- %d\n", i, j,
+									   sol[i][j], i + 1, j + 1);
+				}
+
+				// make a new column in lamdaSum constraint
+				col.addTerm(1, lambdaSum[0]);
+
+				// add the new column into model
+				double newLambdaCoeff = 0;
+
+				for (i = 0; i < n; i++)
+					for (j = 1; j < n; j++)
+						newLambdaCoeff -= cost * vw * dis_v[i][j] * sol[i][j];
+
+				cout << "newLambdaCoeff=" << newLambdaCoeff << endl;
+
+				lambda.push_back(
+					Master.addVar(0.0, GRB_INFINITY, newLambdaCoeff,
+								  GRB_CONTINUOUS, col,
+								  "lambda_" + itos(itrNum)));
+
+				for (i = 0; i < n; i++)
+					delete[] sol[i];
+				delete[] sol;
+			}
+
+			Master.write("AddingVar.lp");
+
+			// if (itrNum >= 3)
+			// exit (1);
+
+			itrNum++;
 		}
 
-	      if (PRINT_FOR_DEBUG)
+		if (convergePoint < -99)
+			cout << "No Result" << endl;
+		else
 		{
-		  printf ("Selected arcs: \n");
-		  for (i = 0; i < n; i++)
-		    for (j = 0; j < n; j++)
-		      if (sol[i][j] > 0.999 && sol[i][j] < 1.001)
-			printf ("sol[%d][%d]= %lf,  %d -- %d\n", i, j,
-				sol[i][j], i + 1, j + 1);
+			cout << "========================" << endl;
+			cout << "convergePoint=" << convergePoint << endl;
+			cout << "PPobj=" << PPobj << endl;
+			cout << "itrNum=" << itrNum << endl;
 		}
 
-	      //make a new column in lamdaSum constraint
-	      col.addTerm (1, lambdaSum[0]);
+		for (i = 0; i < n; i++)
+			for (j = 0; j < n; j++)
+				y[i][j].set(GRB_CharAttr_VType, GRB_BINARY);
 
-	      //add the new column into model
-	      double newLambdaCoeff = 0;
+		// Fix variable other lambda var to be 0 except the last added lambda
+		// lambda[0] represents route from 0 to (n-1)
+		for (i = 0; i < itrNum - 1; i++)
+			lambda[i].set(GRB_DoubleAttr_UB, 0);
 
-	      for (i = 0; i < n; i++)
-		for (j = 1; j < n; j++)
-		  newLambdaCoeff -= cost * vw * dis[i][j] * sol[i][j];
+		Master.optimize();
 
-	      cout << "newLambdaCoeff=" << newLambdaCoeff << endl;
+		double objValue = Master.get(GRB_DoubleAttr_ObjVal);
+		cout << "objective with binary y and the last added route: " << objValue
+			 << "\n";
 
-	      lambda.push_back (
-		  Master.addVar (0.0, GRB_INFINITY, newLambdaCoeff,
-				 GRB_CONTINUOUS, col,
-				 "lambda_" + itos (itrNum)));
+		/*
+		 if (Master.get (GRB_IntAttr_SolCount) > 0)
+		 {
 
-	      for (i = 0; i < n; i++)
-		delete[] sol[i];
-	      delete[] sol;
-	    }
-
-	  Master.write ("AddingVar.lp");
-
-	  //if (itrNum >= 3)
-	  //exit (1);
-
-	  itrNum++;
+		 for (i = 0; i < itrNum ; i++)
+		 {
+		 double sol_val = lambda[i].get (GRB_DoubleAttr_X);
+		 //if (sol[i] > 0.999 && sol[i] < 1.001)
+		 cout << "lambda[" << i << "]=" << sol_val << endl;
+		 }
+		 }
+		 */
 	}
-
-      if (convergePoint < -99)
-	cout << "No Result" << endl;
-      else
+	catch (GRBException e)
 	{
-	  cout << "========================" << endl;
-	  cout << "convergePoint=" << convergePoint << endl;
-	  cout << "PPobj=" << PPobj << endl;
-	  cout << "itrNum=" << itrNum << endl;
+		cout << "Error code = " << e.getErrorCode() << endl;
+		cout << e.getMessage() << endl;
+	}
+	catch (...)
+	{
+		cout << "Exception during optimization" << endl;
 	}
 
-      for (i = 0; i < n; i++)
-	for (j = 0; j < n; j++)
-	  y[i][j].set (GRB_CharAttr_VType, GRB_BINARY);
-
-      // Fix variable other lambda var to be 0 except the last added lambda
-      //lambda[0] represents route from 0 to n(n-1)
-      for (i = 0; i < itrNum - 1; i++)
-	lambda[i].set (GRB_DoubleAttr_UB, 0);
-
-      Master.optimize ();
-
-      double objValue = Master.get (GRB_DoubleAttr_ObjVal);
-      cout << "objective with binary y and the last added route: " << objValue
-	  << "\n";
-
-      /*
-       if (Master.get (GRB_IntAttr_SolCount) > 0)
-       {
-
-       for (i = 0; i < itrNum ; i++)
-       {
-       double sol_val = lambda[i].get (GRB_DoubleAttr_X);
-       //if (sol[i] > 0.999 && sol[i] < 1.001)
-       cout << "lambda[" << i << "]=" << sol_val << endl;
-       }
-       }
-       */
-    }
-  catch (GRBException e)
-    {
-      cout << "Error code = " << e.getErrorCode () << endl;
-      cout << e.getMessage () << endl;
-    }
-  catch (...)
-    {
-      cout << "Exception during optimization" << endl;
-    }
-
-  return 0;
+	return 0;
 }

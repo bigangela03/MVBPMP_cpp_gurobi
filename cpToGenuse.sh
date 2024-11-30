@@ -17,3 +17,4 @@
 %scp MVBPMP_LR_openmp.cpp ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
 %scp BPMP_LR.cpp ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
 scp BPMP_DW-CG.cpp ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
+scp ga.h ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
