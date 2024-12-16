@@ -25,6 +25,7 @@
 #include "readData.h"
 // #include "ga_objfunc_greedy.h"
 #include "ga.h"
+#include "dominace.h"
 
 // #include <omp.h>
 
@@ -39,9 +40,11 @@ int numV = 3; // number of vehicles; will be overwritten when reading vehicle fi
 // since it's easy to read variables with short subscript, like x[n][n][numV]
 int NUM_NODES;
 
-bool PRINT_FOR_DEBUG = false;
+bool PRINT_FOR_DEBUG = true;
 
-bool USE_GA_FOR_INIT_SOL = true;
+bool USE_GA_FOR_INIT_SOL = false; // the experiment shows that a good initial solution doesn't reduce the number of iterations of sub-problem
+
+bool USE_DOMINACE_METHOD_OR_SUB_PROBLEM = false; // if it is false, Gurobi will be used for pricing problem
 
 double bigM = 10000000;
 double epsilon = numeric_limits<double>::epsilon();
@@ -150,7 +153,6 @@ int main(int argc, char *argv[])
 	try
 	{
 		int i, j, k;
-
 		// Patterns
 		// double pat[][2];
 
@@ -191,7 +193,7 @@ int main(int argc, char *argv[])
 
 		if (PRINT_FOR_DEBUG)
 		{
-			cout << "initial patterns \n";
+			cout << "=> initial patterns: \n";
 			for (i = 0; i < n; i++)
 			{
 				for (j = 0; j < n; j++)
@@ -307,6 +309,8 @@ int main(int argc, char *argv[])
 		double convergePoint = -100;
 		double PPobj = -100;
 
+		bool findSolutionInThisIteration;
+
 		while (true)
 		{
 			printf("======== Iteration %d ========\n", itrNum);
@@ -315,6 +319,8 @@ int main(int argc, char *argv[])
 			// GRBModel relax = Master.relax ();
 			// relax.write ("dw-cg-relax.lp");
 			// relax.optimize ();
+
+			findSolutionInThisIteration = false;
 
 			Master.write("dw-cg-master.lp");
 			Master.getEnv().set(GRB_IntParam_OutputFlag, 0); // Silent Mode
@@ -334,6 +340,7 @@ int main(int argc, char *argv[])
 
 			if (PRINT_FOR_DEBUG)
 			{
+				cout<<"==> dual values:"<<endl;
 				for (i = 0; i < n; i++)
 				{
 					for (j = 0; j < n; j++)
@@ -348,136 +355,212 @@ int main(int argc, char *argv[])
 				cout << "pi_lambda dual " << pi_lambda_sum << endl;
 
 			//================> Pricing Problem <================
-			if (PRINT_FOR_DEBUG)
-				cout << "Start Pricing Problem \n";
-
-			GRBModel PPmodel = GRBModel(*env);
-			// PP.set (GRB_IntAttr_ModelSense, -1);
-
-			GRBVar **x = NULL;
-			GRBVar s[n];
-
-			x = new GRBVar *[n];
-			for (i = 0; i < n; i++)
-				x[i] = new GRBVar[n];
-
-			for (i = 0; i < n; i++)
+			double **sol = new double *[n];
+			if (USE_DOMINACE_METHOD_OR_SUB_PROBLEM)
 			{
-				s[i] = PPmodel.addVar(0.0, n, 0.0, GRB_CONTINUOUS,
-									  "s_" + itos(i));
+
+				//===> the objective is to minimize value, so we get negative of the function used for Gurobi
+				double **xCoeff = new double *[n];
+
+				for (int i = 0; i < n; i++)
+					xCoeff[i] = new double[n];
+
+				for (i = 0; i < n - 1; i++)
+					for (j = 1; j < n; j++)
+					{
+						xCoeff[i][j] = 0;
+						xCoeff[i][j] += cost * vw * dis_v[i][j];
+						xCoeff[i][j] -= Q * pi[i][j];
+					}
+				// assigen big value to unaccesiable arc in case it is used in runDominance()
 				for (j = 0; j < n; j++)
-					x[i][j] = PPmodel.addVar(0.0, 1.0, 0, GRB_BINARY,
-											 "x_" + itos(i) + "_" + itos(j));
+					xCoeff[n - 1][j] = 1000000;
+				for (i = 0; i < n; i++)
+					xCoeff[i][0] = 1000000;
+				// obj += pi_lambda_sum;
+
+				//===> !!!!!! selectedRoute index starts from 0 !!!!!!
+				// return the cost of the selected Route !!!
+				double disLimit = (double)route.DIS;
+				double objValue_PP;
+				vector<int> selectedRoute = runDominace(n, dis_v, xCoeff, disLimit, &objValue_PP);
+
+				objValue_PP += pi_lambda_sum;
+				cout << "objValue_PP=" << objValue_PP << endl;
+
+				exit(1);
+
+				cout << "route size: " << selectedRoute.size() << endl;
+
+				if (objValue_PP < 0.000001)
+				{
+					cout << "Optimum Found!" << endl;
+
+					convergePoint = objValue_master;
+					PPobj = objValue_PP;
+
+					break;
+				}
+
+				if (selectedRoute.size() > 1)
+				{
+					findSolutionInThisIteration = true;
+					//===> set up dimension of sol array
+					for (i = 0; i < n; i++)
+						sol[i] = new double[n];
+
+					//===> pre-assign sol array value
+					for (i = 0; i < n; i++)
+						for (j = 0; j < n; j++)
+							sol[i][j] = 0;
+
+					//===> assign value from returned route to sol array
+					for (i = 0; i < selectedRoute.size() - 1; i++)
+						sol[selectedRoute[i]][selectedRoute[i + 1]] = 1;
+				}
 			}
-
-			for (i = 0; i < n; i++)
+			else
 			{
-				x[i][i].set(GRB_DoubleAttr_UB, 0);
-				x[i][0].set(GRB_DoubleAttr_UB, 0);
-				x[n - 1][i].set(GRB_DoubleAttr_UB, 0);
-			}
 
-			if (PRINT_FOR_DEBUG)
-				cout << "PP variables added! \n";
+				//===> when not using dominace method, use Gurobi to solve the MIP
 
-			// vehicle goes out of node 1
-			GRBLinExpr expr1 = 0.0;
-			for (i = 1; i < n; i++)
-				expr1 += x[0][i];
-			PPmodel.addConstr(expr1 == 1, "origin");
+				if (PRINT_FOR_DEBUG)
+					cout << "Start Pricing Problem \n";
 
-			// vehicle goes back to node n
-			GRBLinExpr expr2 = 0.0;
-			for (i = 0; i < n - 1; i++)
-				expr2 += x[i][n - 1];
-			PPmodel.addConstr(expr2 == 1, "destination");
+				GRBModel PPmodel = GRBModel(*env);
+				// PP.set (GRB_IntAttr_ModelSense, -1);
 
-			// flow conservation
-			for (int k = 1; k < n - 1; k++)
-			{
-				GRBLinExpr expr = 0;
+				GRBVar **x = NULL;
+				GRBVar s[n];
+
+				x = new GRBVar *[n];
+				for (i = 0; i < n; i++)
+					x[i] = new GRBVar[n];
+
+				for (i = 0; i < n; i++)
+				{
+					s[i] = PPmodel.addVar(0.0, n, 0.0, GRB_CONTINUOUS,
+										  "s_" + itos(i));
+					for (j = 0; j < n; j++)
+						x[i][j] = PPmodel.addVar(0.0, 1.0, 0, GRB_BINARY,
+												 "x_" + itos(i) + "_" + itos(j));
+				}
+
+				for (i = 0; i < n; i++)
+				{
+					x[i][i].set(GRB_DoubleAttr_UB, 0);
+					x[i][0].set(GRB_DoubleAttr_UB, 0);
+					x[n - 1][i].set(GRB_DoubleAttr_UB, 0);
+				}
+
+				if (PRINT_FOR_DEBUG)
+					cout << "PP variables added! \n";
+
+				// vehicle goes out of node 1
+				GRBLinExpr expr1 = 0.0;
+				for (i = 1; i < n; i++)
+					expr1 += x[0][i];
+				PPmodel.addConstr(expr1 == 1, "origin");
+
+				// vehicle goes back to node n
+				GRBLinExpr expr2 = 0.0;
 				for (i = 0; i < n - 1; i++)
-					expr += x[i][k];
-				for (j = 1; j < n; j++)
-					expr -= x[k][j];
-				PPmodel.addConstr(expr == 0, "flow_conservation_" + itos(k));
-			}
+					expr2 += x[i][n - 1];
+				PPmodel.addConstr(expr2 == 1, "destination");
 
-			// distance
-			GRBLinExpr expr3 = 0.0;
-			for (i = 0; i < n - 1; i++)
-				for (j = 1; j < n; j++)
-					expr3 += dis_v[i][j] * x[i][j];
-			PPmodel.addConstr(expr3 <= route.DIS, "distance");
+				// flow conservation
+				for (int k = 1; k < n - 1; k++)
+				{
+					GRBLinExpr expr = 0;
+					for (i = 0; i < n - 1; i++)
+						expr += x[i][k];
+					for (j = 1; j < n; j++)
+						expr -= x[k][j];
+					PPmodel.addConstr(expr == 0, "flow_conservation_" + itos(k));
+				}
 
-			// node degree less than 1
-			for (int k = 1; k < n - 1; k++)
-			{
-				GRBLinExpr expr = 0.0;
+				// distance
+				GRBLinExpr expr3 = 0.0;
 				for (i = 0; i < n - 1; i++)
-					expr += x[i][k];
-				PPmodel.addConstr(expr <= 1, "indegree_" + itos(k));
-			}
+					for (j = 1; j < n; j++)
+						expr3 += dis_v[i][j] * x[i][j];
+				PPmodel.addConstr(expr3 <= route.DIS, "distance");
 
-			// subtour elimination
-			for (i = 0; i < n - 1; i++)
-				for (j = 1; j < n; j++)
+				// node degree less than 1
+				for (int k = 1; k < n - 1; k++)
 				{
 					GRBLinExpr expr = 0.0;
-					expr += s[i] - s[j] + (n - 1) * x[i][j] + (n - 3) * x[j][i];
-					PPmodel.addConstr(expr <= n - 2,
-									  "s_" + itos(i) + "_" + itos(j));
+					for (i = 0; i < n - 1; i++)
+						expr += x[i][k];
+					PPmodel.addConstr(expr <= 1, "indegree_" + itos(k));
 				}
 
-			if (PRINT_FOR_DEBUG)
-				cout << "PP constraints added! \n";
+				// subtour elimination
+				for (i = 0; i < n - 1; i++)
+					for (j = 1; j < n; j++)
+					{
+						GRBLinExpr expr = 0.0;
+						expr += s[i] - s[j] + (n - 1) * x[i][j] + (n - 3) * x[j][i];
+						PPmodel.addConstr(expr <= n - 2,
+										  "s_" + itos(i) + "_" + itos(j));
+					}
 
-			// set objective
-			GRBLinExpr obj = 0.0;
-			for (i = 0; i < n - 1; i++)
-				for (j = 1; j < n; j++)
+				if (PRINT_FOR_DEBUG)
+					cout << "PP constraints added! \n";
+
+				// set objective
+				GRBLinExpr obj = 0.0;
+				for (i = 0; i < n - 1; i++)
+					for (j = 1; j < n; j++)
+					{
+						obj -= cost * vw * dis_v[i][j] * x[i][j];
+						obj += Q * pi[i][j] * x[i][j];
+					}
+				obj -= pi_lambda_sum;
+				PPmodel.setObjective(obj, GRB_MAXIMIZE);
+
+				if (PRINT_FOR_DEBUG)
+					cout << "PP objective function is set up! \n";
+
+				PPmodel.getEnv().set(GRB_IntParam_OutputFlag, 0); // Silent Mode
+				PPmodel.write("DW_pricingModel.lp");
+				PPmodel.optimize();
+
+				double objValue_PP = PPmodel.get(GRB_DoubleAttr_ObjVal);
+				cout << "objective of PP problem: " << objValue_PP << "\n";
+
+				if (objValue_PP < 0.000001)
 				{
-					obj -= cost * vw * dis_v[i][j] * x[i][j];
-					obj += Q * pi[i][j] * x[i][j];
+					cout << "Optimum Found!" << endl;
+
+					convergePoint = objValue_master;
+					PPobj = objValue_PP;
+
+					break;
 				}
-			obj -= pi_lambda_sum;
-			PPmodel.setObjective(obj, GRB_MAXIMIZE);
 
-			if (PRINT_FOR_DEBUG)
-				cout << "PP objective function is set up! \n";
+				if (PPmodel.get(GRB_IntAttr_SolCount) > 0)
+				{
 
-			PPmodel.getEnv().set(GRB_IntParam_OutputFlag, 0); // Silent Mode
-			PPmodel.write("DW_pricingModel.lp");
-			PPmodel.optimize();
+					findSolutionInThisIteration = true;
 
-			double objValue_PP = PPmodel.get(GRB_DoubleAttr_ObjVal);
-			cout << "objective of PP problem: " << objValue_PP << "\n";
+					// Extract solution and create new column
 
-			if (objValue_PP < 0.000001)
-			{
-				cout << "Optimum Found!" << endl;
-
-				convergePoint = objValue_master;
-				PPobj = objValue_PP;
-
-				break;
+					for (i = 0; i < n; i++)
+						sol[i] = PPmodel.get(GRB_DoubleAttr_X, x[i], n);
+				}
 			}
 
-			if (PPmodel.get(GRB_IntAttr_SolCount) > 0)
+			//======> AFTER SOLVING PRICING PROBLEM AND READ ROUTE INFO, ADD NEW VAR TO MASTER PROBLEM <======
+			if (findSolutionInThisIteration)
 			{
-				// Extract solution and create new column
 				GRBColumn col;
-
-				double **sol = new double *[n];
 
 				// make a new column in arc flow capacity constraint
 				for (i = 0; i < n; i++)
-				{
-					sol[i] = PPmodel.get(GRB_DoubleAttr_X, x[i], n);
 					for (j = 0; j < n; j++)
 						if (sol[i][j] > 0.999 && sol[i][j] < 1.001)
 							col.addTerm(-Q, arcFlowCapacity[i][j]);
-				}
 
 				if (PRINT_FOR_DEBUG)
 				{
@@ -509,6 +592,11 @@ int main(int argc, char *argv[])
 				for (i = 0; i < n; i++)
 					delete[] sol[i];
 				delete[] sol;
+			}
+			else
+			{
+				printf("ERROR: no route solution in pricing problem is found!\n");
+				exit(1);
 			}
 
 			Master.write("AddingVar.lp");
