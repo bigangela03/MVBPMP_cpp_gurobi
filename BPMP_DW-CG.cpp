@@ -236,8 +236,8 @@ int main(int argc, char *argv[])
 				for (k = 0; k < n; k++)
 				{
 					string s = "z_" + itos(i) + "_" + itos(j) + "_" + itos(k);
-					//*** in DW-CG, we force u<=Q (Q is the vehicle's capacity)
-					z[i][j][k] = Master.addVar(0.0, Q, 0.0, GRB_CONTINUOUS, s);
+					//*** in DW-CG, we force u<=capacity (capacity is the vehicle's capacity)
+					z[i][j][k] = Master.addVar(0.0, capacity, 0.0, GRB_CONTINUOUS, s);
 				}
 			}
 		if (PRINT_FOR_DEBUG)
@@ -274,7 +274,7 @@ int main(int argc, char *argv[])
 				for (k = 0; k < n; k++)
 					expr += z[i][k][j] + z[k][j][i] - z[i][j][k];
 
-				expr -= Q * newCol[i][j] * lambda[0];
+				expr -= capacity * newCol[i][j] * lambda[0];
 
 				arcFlowCapacity[i][j] = Master.addConstr(
 					expr <= 0, "arcFlowCap_" + itos(i) + "_" + itos(j));
@@ -370,7 +370,7 @@ int main(int argc, char *argv[])
 					{
 						xCoeff[i][j] = 0;
 						xCoeff[i][j] += cost * vw * dis_v[i][j];
-						xCoeff[i][j] -= Q * pi[i][j];
+						xCoeff[i][j] -= capacity * pi[i][j];
 					}
 				// assigen big value to unaccesiable arc in case it is used in runDominance()
 				for (j = 0; j < n; j++)
@@ -514,7 +514,7 @@ int main(int argc, char *argv[])
 					for (j = 1; j < n; j++)
 					{
 						obj -= cost * vw * dis_v[i][j] * x[i][j];
-						obj += Q * pi[i][j] * x[i][j];
+						obj += capacity * pi[i][j] * x[i][j];
 					}
 				obj -= pi_lambda_sum;
 				PPmodel.setObjective(obj, GRB_MAXIMIZE);
@@ -560,7 +560,7 @@ int main(int argc, char *argv[])
 				for (i = 0; i < n; i++)
 					for (j = 0; j < n; j++)
 						if (sol[i][j] > 0.999 && sol[i][j] < 1.001)
-							col.addTerm(-Q, arcFlowCapacity[i][j]);
+							col.addTerm(-capacity, arcFlowCapacity[i][j]);
 
 				if (PRINT_FOR_DEBUG)
 				{
