@@ -25,7 +25,8 @@
 #include "readData.h"
 // #include "ga_objfunc_greedy.h"
 #include "ga.h"
-#include "dominace.h"
+#include "dominance.h"
+// #include "dominance_inaccesiblenode.h"
 
 // #include <omp.h>
 
@@ -40,16 +41,14 @@ int numV = 3; // number of vehicles; will be overwritten when reading vehicle fi
 // since it's easy to read variables with short subscript, like x[n][n][numV]
 int NUM_NODES;
 
-bool PRINT_FOR_DEBUG = true;
+bool PRINT_FOR_DEBUG = false;
 
 bool USE_GA_FOR_INIT_SOL = false; // the experiment shows that a good initial solution doesn't reduce the number of iterations of sub-problem
 
 bool USE_DOMINACE_METHOD_OR_SUB_PROBLEM = false; // if it is false, Gurobi will be used for pricing problem
 
-double bigM = 10000000;
+// double bigM = 10000000;
 double epsilon = numeric_limits<double>::epsilon();
-
-double distanceLimit = 20;
 
 // itos is defined in ga.h as well
 //  string
@@ -59,6 +58,8 @@ double distanceLimit = 20;
 //  	s << i;
 //  	return s.str();
 //  }
+
+void reportTime(clock_t, auto);
 
 int main(int argc, char *argv[])
 {
@@ -81,10 +82,9 @@ int main(int argc, char *argv[])
 		numV = stoi(argv[2]);
 	}
 
-	clock_t beginTime, endTimeOfLastIteration;
+	clock_t beginTime = clock();
 
 	auto beginWallClock = high_resolution_clock::now();
-	auto endTimeOfLastIterationWallClock = high_resolution_clock::now();
 
 	readData route;
 
@@ -174,8 +174,10 @@ int main(int argc, char *argv[])
 		cout << "before using ga" << endl;
 		if (USE_GA_FOR_INIT_SOL)
 		{
+			double disLimit = (double)route.DIS;
+
 			// right now it only returns the selected route, no customers and profit info
-			vector<int> finalRoute = runga(n, price, cost, capacity, distanceLimit, vw, wt, dis_v);
+			vector<int> finalRoute = runga(n, price, cost, capacity, disLimit, vw, wt, dis_v);
 
 			cout << "========> selected route using genetic algorithm:" << endl;
 			for (int i : finalRoute)
@@ -215,8 +217,8 @@ int main(int argc, char *argv[])
 			cout << "variable lambda is added \n";
 
 		//*** set up var y and triples variable z
-		GRBVar **y = NULL;
-		GRBVar ***z = NULL;
+		GRBVar **y = nullptr;
+		GRBVar ***z = nullptr;
 		y = new GRBVar *[n];
 		z = new GRBVar **[n];
 		for (i = 0; i < n; i++)
@@ -311,9 +313,13 @@ int main(int argc, char *argv[])
 
 		bool findSolutionInThisIteration;
 
+		double **sol = new double *[n];
+		for (i = 0; i < n; i++)
+			sol[i] = new double[n];
+
 		while (true)
 		{
-			printf("======== Iteration %d ========\n", itrNum);
+			printf("======== DW-CG Iteration %d ========\n", itrNum);
 
 			//*** the model is empty after I use model.relax()
 			// GRBModel relax = Master.relax ();
@@ -340,7 +346,7 @@ int main(int argc, char *argv[])
 
 			if (PRINT_FOR_DEBUG)
 			{
-				cout<<"==> dual values:"<<endl;
+				cout << "==> dual values:" << endl;
 				for (i = 0; i < n; i++)
 				{
 					for (j = 0; j < n; j++)
@@ -355,15 +361,14 @@ int main(int argc, char *argv[])
 				cout << "pi_lambda dual " << pi_lambda_sum << endl;
 
 			//================> Pricing Problem <================
-			double **sol = new double *[n];
+			// double **sol = new double *[n];
 			if (USE_DOMINACE_METHOD_OR_SUB_PROBLEM)
 			{
 
 				//===> the objective is to minimize value, so we get negative of the function used for Gurobi
-				double **xCoeff = new double *[n];
+				// double **xCoeff = new double *[n];
 
-				for (int i = 0; i < n; i++)
-					xCoeff[i] = new double[n];
+				vector<vector<double>> xCoeff(n, std::vector<double>(n));
 
 				for (i = 0; i < n - 1; i++)
 					for (j = 1; j < n; j++)
@@ -377,37 +382,35 @@ int main(int argc, char *argv[])
 					xCoeff[n - 1][j] = 1000000;
 				for (i = 0; i < n; i++)
 					xCoeff[i][0] = 1000000;
-				// obj += pi_lambda_sum;
 
 				//===> !!!!!! selectedRoute index starts from 0 !!!!!!
+				//===> for example, selectedRoute[0]=0, selectedRoute[1]=6, selectedRoute[2]=9
+				//===> it means the route is 1->7->10
 				// return the cost of the selected Route !!!
 				double disLimit = (double)route.DIS;
 				double objValue_PP;
-				vector<int> selectedRoute = runDominace(n, dis_v, xCoeff, disLimit, &objValue_PP);
+				// vector<int> selectedRoute = runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP);
+				vector<int> selectedRoute;
+				runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute);
 
 				objValue_PP += pi_lambda_sum;
-				cout << "objValue_PP=" << objValue_PP << endl;
+				objValue_PP = -objValue_PP;
+				printf("objective of Pricing problem (dominace): %lf\n", objValue_PP);
 
-				exit(1);
-
-				cout << "route size: " << selectedRoute.size() << endl;
-
-				if (objValue_PP < 0.000001)
+				if (objValue_PP < 0.000001 && objValue_PP > -0.000001)
 				{
 					cout << "Optimum Found!" << endl;
 
 					convergePoint = objValue_master;
 					PPobj = objValue_PP;
-
 					break;
 				}
-
 				if (selectedRoute.size() > 1)
 				{
 					findSolutionInThisIteration = true;
-					//===> set up dimension of sol array
-					for (i = 0; i < n; i++)
-						sol[i] = new double[n];
+					// //===> set up dimension of sol array
+					// for (i = 0; i < n; i++)
+					// 	sol[i] = new double[n];
 
 					//===> pre-assign sol array value
 					for (i = 0; i < n; i++)
@@ -417,6 +420,11 @@ int main(int argc, char *argv[])
 					//===> assign value from returned route to sol array
 					for (i = 0; i < selectedRoute.size() - 1; i++)
 						sol[selectedRoute[i]][selectedRoute[i + 1]] = 1;
+
+					cout << "selected reoute" << endl;
+					for (i = 0; i < selectedRoute.size() - 1; i++)
+						cout << selectedRoute[i] << "->" << selectedRoute[i + 1] << ", ";
+					cout << endl;
 				}
 			}
 			else
@@ -430,7 +438,7 @@ int main(int argc, char *argv[])
 				GRBModel PPmodel = GRBModel(*env);
 				// PP.set (GRB_IntAttr_ModelSense, -1);
 
-				GRBVar **x = NULL;
+				GRBVar **x = nullptr;
 				GRBVar s[n];
 
 				x = new GRBVar *[n];
@@ -529,7 +537,8 @@ int main(int argc, char *argv[])
 				double objValue_PP = PPmodel.get(GRB_DoubleAttr_ObjVal);
 				cout << "objective of PP problem: " << objValue_PP << "\n";
 
-				if (objValue_PP < 0.000001)
+				// if (objValue_PP < 0.000001)
+				if (objValue_PP < 0.000001 && objValue_PP > -0.000001)
 				{
 					cout << "Optimum Found!" << endl;
 
@@ -549,11 +558,17 @@ int main(int argc, char *argv[])
 					for (i = 0; i < n; i++)
 						sol[i] = PPmodel.get(GRB_DoubleAttr_X, x[i], n);
 				}
+
+				for (i = 0; i < n; i++)
+					delete[] x[i];
+				delete[] x;
+				x = nullptr;
 			}
 
 			//======> AFTER SOLVING PRICING PROBLEM AND READ ROUTE INFO, ADD NEW VAR TO MASTER PROBLEM <======
 			if (findSolutionInThisIteration)
 			{
+
 				GRBColumn col;
 
 				// make a new column in arc flow capacity constraint
@@ -588,10 +603,6 @@ int main(int argc, char *argv[])
 					Master.addVar(0.0, GRB_INFINITY, newLambdaCoeff,
 								  GRB_CONTINUOUS, col,
 								  "lambda_" + itos(itrNum)));
-
-				for (i = 0; i < n; i++)
-					delete[] sol[i];
-				delete[] sol;
 			}
 			else
 			{
@@ -607,6 +618,11 @@ int main(int argc, char *argv[])
 			itrNum++;
 		}
 
+		for (i = 0; i < n; i++)
+			delete[] sol[i];
+		delete[] sol;
+		sol = nullptr;
+
 		if (convergePoint < -99)
 			cout << "No Result" << endl;
 		else
@@ -614,7 +630,7 @@ int main(int argc, char *argv[])
 			cout << "========================" << endl;
 			cout << "convergePoint=" << convergePoint << endl;
 			cout << "PPobj=" << PPobj << endl;
-			cout << "itrNum=" << itrNum << endl;
+			cout << "DW-CG itrNum=" << itrNum << endl;
 		}
 
 		for (i = 0; i < n; i++)
@@ -655,5 +671,26 @@ int main(int argc, char *argv[])
 		cout << "Exception during optimization" << endl;
 	}
 
+	delete env;
+	env = nullptr;
+
+	reportTime(beginTime, beginWallClock);
+
 	return 0;
+}
+
+void reportTime(clock_t begin, auto beginWallClock)
+{
+	// clock() gives cpu time on Linux, and wall time on Windows.
+	// link: https://stackoverflow.com/questions/17432502/how-can-i-measure-cpu-time-and-wall-clock-time-on-both-linux-windows
+	clock_t end = clock();
+	double computerTime = (double)(end - begin);
+	double second = computerTime / CLOCKS_PER_SEC;
+	printf("CPU time (on Linux): %lf computer time,  %lf seconds\n",
+		   computerTime, second);
+
+	// wallclock time
+	auto endWallClock = high_resolution_clock::now();
+	auto elapsedWallClock = duration_cast<std::chrono::nanoseconds>(endWallClock - beginWallClock);
+	printf("Wall clock time: %.3f seconds.\n", elapsedWallClock.count() * 1e-9);
 }
