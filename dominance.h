@@ -42,7 +42,9 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
 {
 
     //===> set up parameters used in dominance.h
-    bool PRINT_FOR_DEBUG = true;
+    int startingNode = 0;
+    int endingNode = n - 1;
+    bool PRINT_FOR_DEBUG = false;
     double bigM = 10000000; // bigM has to be big enough, so than when checking domincated labels inside F set, when comparing two equivalent labels, it helps to find label with more bigM
     double verySmallNum = 0.0000001;
 
@@ -86,8 +88,6 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
         }
     }
 
-    int startingNode = 0;
-
     vector<set<vector<double>>> bigLambda_allNodesLableSet;
 
     //===> initialize the lable for starting node
@@ -112,6 +112,9 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
         }
     }
 
+    //===> initialize the newly added labels set as well
+    vector<set<vector<double>>> newLabelSet(bigLambda_allNodesLableSet);
+
     set<int> E_toBeTreatedNodesSet;
     E_toBeTreatedNodesSet.insert(startingNode);
 
@@ -121,7 +124,7 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
     {
         itrNum++;
 
-        // if (PRINT_FOR_DEBUG)
+        if (PRINT_FOR_DEBUG)
         {
             cout << endl;
             cout << "======> dominace iteration " << itrNum << " <======" << endl;
@@ -130,6 +133,11 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
                 cout << temp << " ";
             cout << endl;
         }
+
+        //===> only check the labels newly added in the last iteration
+        vector<set<vector<double>>> labelsAddedInLastIteration(newLabelSet);
+        for (int i = 0; i < newLabelSet.size(); i++)
+            newLabelSet[i].clear();
 
         set<int> E_toBeTreatedNodesSetCopy;
 
@@ -141,6 +149,13 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
 
         for (auto &node : E_toBeTreatedNodesSetCopy) //===> LINE 9 in ESPPRC(p)
         {
+
+            if (labelsAddedInLastIteration[node].size() < 1)
+            {
+                printf("ERROR: There must be labels in E set!");
+                exit(1);
+            }
+
             // ===> ending node (n-1) has no successors
             if (node == n - 1)
             {
@@ -161,12 +176,16 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
                     cout << "\nsucc=" << succ << " (itr " << itrNum << ", node " << node << ")" << endl;
                     cout << "===> bigLambda_allNodesLableSet[" << node << "].size =" << bigLambda_allNodesLableSet[node].size() << endl;
                     printLabelSet(bigLambda_allNodesLableSet[node], bigM);
+                    cout << "===> labelsAddedInLastIteration[" << node << "].size =" << labelsAddedInLastIteration[node].size() << endl;
+                    printLabelSet(labelsAddedInLastIteration[node], bigM);
+                    cout << "===> newLabelSet[" << node << "].size =" << newLabelSet[node].size() << endl;
+                    printLabelSet(newLabelSet[node], bigM);
                 }
 
                 set<vector<double>> F_nodeSuccLabelSet; //===> LINE 11 in ESPPRC(p) PSEUDO-CODE
-                // set<vector<double>> labelsOverDistLimit;
+                                                        // set<vector<double>> labelsOverDistLimit;
 
-                for (auto &label : bigLambda_allNodesLableSet[node]) //===> LINE 12 in ESPPRC(p) PSEUDO-CODE
+                for (auto &label : labelsAddedInLastIteration[node]) //===> LINE 12 in ESPPRC(p) PSEUDO-CODE
                 {
 
                     if (label[succ] == 0) //===> LINE 13 in ESPPRC(p) PSEUDO-CODE
@@ -182,12 +201,13 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
                         //===> check resource (distance)
                         double currentDistance = label[n + 1];
 
-                        vector<double> labelTemp;
-                        for (int i = 0; i < n + 3; i++)
-                            labelTemp.push_back(label[i]);
-
-                        if (currentDistance + dis[node][succ] <= disLimit)
+                        // if (currentDistance + dis[node][succ] <= disLimit)
+                        if (currentDistance + dis[node][succ] + dis[succ][endingNode] <= disLimit)
                         {
+                            vector<double> labelTemp;
+                            for (int i = 0; i < n + 3; i++)
+                                labelTemp.push_back(label[i]);
+
                             int numVisitedNodes = label[n];
                             // labelTemp[succ] = 1;                                  //!!! lable[0] to lable[n-1] represents visited nodes
                             labelTemp[succ] = numVisitedNodes + 1;
@@ -288,86 +308,61 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
                     if (Fset.size() >= 2)
                     { // since we are checking lables in a Set, so no labels are duplicate according to Set definition
                         for (int i = 0; i < Fset.size(); i++)
-                        {
                             for (int j = i + 1; j < Fset.size(); j++)
                             {
+
                                 vector<double> label1 = Fset[i];
                                 vector<double> label2 = Fset[j];
-                                int numBiggerEleInlabel2 = 0;
-                                int numBiggerEleInlabel1 = 0;
-                                // int numEquivalent = 0;
-                                // int numExactlySame = 0;
+                                bool label1Dominated = true;
+                                bool label2Dominated = true;
 
-                                for (int i = 0; i < n; i++)
+                                if (!(label1[n + 1] <= label2[n + 1] && label1[n + 2] <= label2[n + 2]))
                                 {
-                                    if ((label1[i] == 0 && label2[i] >= 0) || (label1[i] > 0 && label2[i] > 0))
-                                        numBiggerEleInlabel2++;
-
-                                    //===> when label[i]==M, it means that node i is not accessible since it is over distance limit
-                                    // but it is not visited, so when comparing with another label, M also means 0
-                                    // if ((label1[i] == 0 && label2[i] == 0) || (label1[i] > 0 && label2[i] > 0) || (label1[i] == bigM && label2[i] == 0) || (label1[i] == 0 && label2[i] == bigM))
-                                    //     numEquivalent++;
-
-                                    if ((label1[i] >= 0 && label2[i] == 0) || (label1[i] > 0 && label2[i] > 0))
-                                        numBiggerEleInlabel1++;
-
-                                    // if (label1[i] == label2[i])
-                                    //     numExactlySame++;
+                                    label2Dominated = false;
+                                    if (!(label1[n + 1] >= label2[n + 1] && label1[n + 2] >= label2[n + 2])) // new label is not dominated
+                                        continue;
                                 }
-
-                                // check #of nodes visited, distance, and cost
-                                for (int i = n; i < n + 3; i++)
+                                else // old label is dominated
                                 {
-                                    if (label1[i] <= label2[i])
-                                        numBiggerEleInlabel2++;
-
-                                    // if (label1[i] == label2[i])
-                                    // {
-                                    //     // numEquivalent++;
-                                    //     numExactlySame++;
-                                    // }
-
-                                    if (label1[i] >= label2[i])
-                                        numBiggerEleInlabel1++;
+                                    // new label is not dominated
+                                    if (!(label1[n + 1] >= label2[n + 1] && label1[n + 2] >= label2[n + 2]))
+                                        label1Dominated = false;
                                 }
+                                // if both new label and old label are dominated, they are the same
 
-                                // if (numExactlySame == (n + 3))
-                                // {
-                                //     printf("ERROR: no duplicate lables are supoosed to be in a set!");
-                                //     exit(1);
-                                // }
+                                // keep checking other elements in the label
+                                if (label1Dominated)
+                                    if (label1[n] < label2[n]) // check the number of visted nodes first
+                                        continue;
+                                    else // then check each node
+                                        for (int i = 0; i < n; i++)
+                                            if (label1[i] < label2[i])
+                                            {
+                                                label1Dominated = false;
+                                                break;
+                                            }
 
-                                // in a set, no two lables are the same, so we don't need to check numExactlySame
+                                if (label2Dominated)
+                                    if (label2[n] < label1[n]) // check the number of visted nodes first
+                                        continue;
+                                    else // then check each node
+                                        for (int i = 0; i < n; i++)
+                                            if (label2[i] < label1[i])
+                                            {
+                                                label2Dominated = false;
+                                                break;
+                                            }
 
-                                // if (numBiggerEleInlabel1 == (n + 3) && numExactlySame != (n + 3) && numEquivalent != (n + 3))
-                                if (numBiggerEleInlabel1 == (n + 3))
+                                // we are checking labels in a set, so this scenario doesn't happen
+                                if (label1Dominated && label2Dominated) // two lables are the same
                                     dominatedLabelsAmongNewLabelSet.insert(label1);
 
-                                // if two labels are equivalent, only keeps the one which has more bigM
-                                // if (numEquivalent == (n + 3))
-                                // {
-                                //     double sum1 = 0, sum2 = 0;
-                                //     for (auto &ele : label1)
-                                //         sum1 += ele;
-                                //     for (auto &ele : label2)
-                                //         sum2 += ele;
+                                if (label1Dominated && !label2Dominated)
+                                    dominatedLabelsAmongNewLabelSet.insert(label1);
 
-                                //     if (sum1 > sum2)
-
-                                //         dominatedLabelsAmongNewLabelSet.insert(label2);
-                                //     else
-                                //         dominatedLabelsAmongNewLabelSet.insert(label1);
-                                // }
-
-                                // if numBiggerEleInlabel1 == (n + 3) && numBiggerEleInlabel2 == (n + 3), but not exactly same
-                                // for example (1 2 3 0 0, d, c) and (1 3 2 0 0, d, c)
-                                // then label1 is added to dominated set already, so keep label2
-
-                                // if (numBiggerEleInlabel2 == (n + 3) && numExactlySame != (n + 3) && numEquivalent != (n + 3))
-                                if (numBiggerEleInlabel2 == (n + 3) && numBiggerEleInlabel1 != (n + 3))
+                                if (!label1Dominated && label2Dominated)
                                     dominatedLabelsAmongNewLabelSet.insert(label2);
                             }
-                        }
                     }
 
                     //===> step (2)
@@ -398,94 +393,160 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
 
                     for (auto &newLabel : F_nodeSuccLabelSet)
                     {
-                        // bool newLabelIsDominated = true;
-                        for (auto &oldLabel : bigLambda_allNodesLableSet[succ])
+
+                        if (false)
                         {
-
-                            int old_numBiggerOrEqual = 0;
-                            int new_numBiggerOrEqual = 0;
-                            // int numEquivalent = 0;
-                            int numExactlySame = 0;
-                            // int numZeroBigMDiff = 0;
-                            int numDiff = 0;
-
-                            for (int i = 0; i < n; i++)
+                            for (auto &oldLabel : bigLambda_allNodesLableSet[succ])
                             {
-                                // all scenarios: (1)new=0, old>=0 (0,1,.,n,M); (2) new=1,2,..M, old=1,.,n,M; // not applicable (3) new=M, old=0
-                                // if ((newLabel[i] == 0 && oldLabel[i] >= 0) || (newLabel[i] > 0 && oldLabel[i] > 0) || (newLabel[i] == bigM && oldLabel[i] == 0))
-                                if ((newLabel[i] == 0 && oldLabel[i] >= 0) || (newLabel[i] > 0 && oldLabel[i] > 0))
-                                    old_numBiggerOrEqual++;
+                                int old_numBiggerOrEqual = 0;
+                                int new_numBiggerOrEqual = 0;
+                                // int numEquivalent = 0;
+                                int numExactlySame = 0;
+                                // int numZeroBigMDiff = 0;
+                                int numDiff = 0;
 
-                                //===> when label[i]==M, it means that node i is not accessible since it is over distance limit
-                                // but it is not visited, so when comparing with another label, M also means 0
-                                // if ((newLabel[i] == 0 && oldLabel[i] == 0) || (newLabel[i] > 0 && oldLabel[i] > 0) || (newLabel[i] == bigM && oldLabel[i] == 0) || (newLabel[i] == 0 && oldLabel[i] == bigM))
-                                //     numEquivalent++;
-
-                                if ((newLabel[i] >= 0 && oldLabel[i] == 0) || (newLabel[i] > 0 && oldLabel[i] > 0))
-                                    new_numBiggerOrEqual++;
-
-                                if (newLabel[i] == oldLabel[i])
-                                    numExactlySame++;
-
-                                // if ((newLabel[i] == bigM && oldLabel[i] == 0) || (newLabel[i] == 0 && oldLabel[i] == bigM))
-                                //     numZeroBigMDiff++;
-
-                                // if (newLabel[i] != oldLabel[i])
-                                //     numDiff++;
-                            }
-
-                            // check #of nodes visited, distance, and cost
-                            for (int i = n; i < n + 3; i++)
-                            {
-                                if (newLabel[i] <= oldLabel[i])
-                                    old_numBiggerOrEqual++;
-
-                                if (newLabel[i] == oldLabel[i])
+                                for (int i = 0; i < n; i++)
                                 {
-                                    // numEquivalent++;
-                                    numExactlySame++;
+                                    // all scenarios: (1)new=0, old>=0 (0,1,.,n,M); (2) new=1,2,..M, old=1,.,n,M; // not applicable (3) new=M, old=0
+                                    // if ((newLabel[i] == 0 && oldLabel[i] >= 0) || (newLabel[i] > 0 && oldLabel[i] > 0) || (newLabel[i] == bigM && oldLabel[i] == 0))
+                                    if ((newLabel[i] == 0 && oldLabel[i] >= 0) || (newLabel[i] > 0 && oldLabel[i] > 0))
+                                        old_numBiggerOrEqual++;
+
+                                    //===> when label[i]==M, it means that node i is not accessible since it is over distance limit
+                                    // but it is not visited, so when comparing with another label, M also means 0
+                                    // if ((newLabel[i] == 0 && oldLabel[i] == 0) || (newLabel[i] > 0 && oldLabel[i] > 0) || (newLabel[i] == bigM && oldLabel[i] == 0) || (newLabel[i] == 0 && oldLabel[i] == bigM))
+                                    //     numEquivalent++;
+
+                                    if ((newLabel[i] >= 0 && oldLabel[i] == 0) || (newLabel[i] > 0 && oldLabel[i] > 0))
+                                        new_numBiggerOrEqual++;
+
+                                    if (newLabel[i] == oldLabel[i])
+                                        numExactlySame++;
+
+                                    // if ((newLabel[i] == bigM && oldLabel[i] == 0) || (newLabel[i] == 0 && oldLabel[i] == bigM))
+                                    //     numZeroBigMDiff++;
+
+                                    // if (newLabel[i] != oldLabel[i])
+                                    //     numDiff++;
                                 }
 
-                                if (newLabel[i] >= oldLabel[i])
-                                    new_numBiggerOrEqual++;
+                                // check #of nodes visited, distance, and cost
+                                for (int i = n; i < n + 3; i++)
+                                {
+                                    if (newLabel[i] <= oldLabel[i])
+                                        old_numBiggerOrEqual++;
+
+                                    if (newLabel[i] == oldLabel[i])
+                                    {
+                                        // numEquivalent++;
+                                        numExactlySame++;
+                                    }
+
+                                    if (newLabel[i] >= oldLabel[i])
+                                        new_numBiggerOrEqual++;
+                                }
+
+                                // if new label is exactly the same as a lable in existing labels
+                                // then new label should be added in dominatedNewLabelSet and removed from F set
+                                // and keep the old label in succ's lable set
+                                // if (new_numBiggerOrEqual == (n + 3) && numExactlySame != (n + 3))
+                                if (new_numBiggerOrEqual == (n + 3))
+                                    dominatedNewLabelSet.insert(newLabel);
+
+                                // if (numZeroBigMDiff == numDiff)
+                                // {
+                                //     dominatedNewLabelSet.insert(newLabel);
+                                // }
+
+                                // if (numEquivalent == (n + 3))
+                                //     dominatedNewLabelSet.insert(newLabel);
+
+                                // for example, newlable=(1 2 3 0 0 d c) and oldlable(1 3 2 0 0 d c),
+                                // then old_numBiggerOrEqual=n+3, and new_numBiggerOrEqual=n+3
+                                // SO IF NOT ADD new_numBiggerOrEqual != (n + 3), BOTH LABELS WILL BE REMOVED
+                                // ALSO, WE WILL ALWAYS REMOVE THE ONE FROM NEW LABLE SET SINCE THERE IS EQUIVALENT OLD LABEL ALREADY
+                                // if (old_numBiggerOrEqual == (n + 3) && numExactlySame != (n + 3) && numEquivalent != (n + 3))
+                                // if (old_numBiggerOrEqual == (n + 3) && numExactlySame != (n + 3) && (numZeroBigMDiff != numDiff))
+                                if (old_numBiggerOrEqual == (n + 3) && numExactlySame != (n + 3) && new_numBiggerOrEqual != (n + 3))
+                                    dominatedExistingLabelSet.insert(oldLabel);
+
+                                // if(numEquivalent==(n+3)), it means oldLabel is the same as newLabel
+                                // when we add newLabel into old label set, the set only keep one
+                                // so we don't need to add this label to either toBeRemoved* label set.
+                                // if we don't consider numEquivalent != (n+3) in the above 2 condistions, then
+                                // this equal label will be added to both toBeRemoved set and finally removed from label set.
+
+                                // if (PRINT_FOR_DEBUG)
+                                // {
+                                //     cout << "---------------------" << endl;
+                                //     printOneLabel(oldLabel, bigM);
+                                //     cout << "numEquivalent: " << numEquivalent << endl;
+                                // }
+                            }
+                        }
+
+                        // work here!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                        // we can compare dist and cost first, if  not (d1>=d2, c1>=c2, or d1<=d2, c1<=c2), continue
+
+                        // then, use some other methods to decide, like if any element violates dominated conditin, then break, so we don't need to check all the elements in a label.
+
+                        for (auto &oldLabel : bigLambda_allNodesLableSet[succ])
+                        {
+                            bool newLabelDominated = true;
+                            bool oldLabelDominated = true;
+
+                            if (!(newLabel[n + 1] <= oldLabel[n + 1] && newLabel[n + 2] <= oldLabel[n + 2]))
+                            {
+                                oldLabelDominated = false;
+                                if (!(newLabel[n + 1] >= oldLabel[n + 1] && newLabel[n + 2] >= oldLabel[n + 2])) // new label is not dominated
+                                    continue;
+                            }
+                            else // old label is dominated
+                            {
+                                // new label is not dominated
+                                if (!(newLabel[n + 1] >= oldLabel[n + 1] && newLabel[n + 2] >= oldLabel[n + 2]))
+                                    newLabelDominated = false;
+                            }
+                            // if both new label and old label are dominated, they are the same
+
+                            // keep checking other elements in the label
+                            if (newLabelDominated)
+                                if (newLabel[n] < oldLabel[n]) // check the number of visted nodes first
+                                    continue;
+                                else // then check each node
+                                    for (int i = 0; i < n; i++)
+                                        if (newLabel[i] < oldLabel[i])
+                                        {
+                                            newLabelDominated = false;
+                                            break;
+                                        }
+
+                            if (oldLabelDominated)
+                                if (oldLabel[n] < newLabel[n]) // check the number of visted nodes first
+                                    continue;
+                                else // then check each node
+                                    for (int i = 0; i < n; i++)
+                                        if (oldLabel[i] < newLabel[i])
+                                        {
+                                            oldLabelDominated = false;
+                                            break;
+                                        }
+
+                            if (PRINT_FOR_DEBUG)
+                            {
+                                cout << "newLabelDominated = " << newLabelDominated << endl;
+                                cout << "oldLabelDominated = " << oldLabelDominated << endl;
+                                printOneLabel(oldLabel, bigM);
                             }
 
-                            // if new label is exactly the same as a lable in existing labels
-                            // then new label should be added in dominatedNewLabelSet and removed from F set
-                            // and keep the old label in succ's lable set
-                            // if (new_numBiggerOrEqual == (n + 3) && numExactlySame != (n + 3))
-                            if (new_numBiggerOrEqual == (n + 3))
+                            if (newLabelDominated && oldLabelDominated) // two lables are the same
                                 dominatedNewLabelSet.insert(newLabel);
 
-                            // if (numZeroBigMDiff == numDiff)
-                            // {
-                            //     dominatedNewLabelSet.insert(newLabel);
-                            // }
+                            if (newLabelDominated && !oldLabelDominated)
+                                dominatedNewLabelSet.insert(newLabel);
 
-                            // if (numEquivalent == (n + 3))
-                            //     dominatedNewLabelSet.insert(newLabel);
-
-                            // for example, newlable=(1 2 3 0 0 d c) and oldlable(1 3 2 0 0 d c),
-                            // then old_numBiggerOrEqual=n+3, and new_numBiggerOrEqual=n+3
-                            // SO IF NOT ADD new_numBiggerOrEqual != (n + 3), BOTH LABELS WILL BE REMOVED
-                            // ALSO, WE WILL ALWAYS REMOVE THE ONE FROM NEW LABLE SET SINCE THERE IS EQUIVALENT OLD LABEL ALREADY
-                            // if (old_numBiggerOrEqual == (n + 3) && numExactlySame != (n + 3) && numEquivalent != (n + 3))
-                            // if (old_numBiggerOrEqual == (n + 3) && numExactlySame != (n + 3) && (numZeroBigMDiff != numDiff))
-                            if (old_numBiggerOrEqual == (n + 3) && numExactlySame != (n + 3) && new_numBiggerOrEqual != (n + 3))
+                            if (!newLabelDominated && oldLabelDominated)
                                 dominatedExistingLabelSet.insert(oldLabel);
-
-                            // if(numEquivalent==(n+3)), it means oldLabel is the same as newLabel
-                            // when we add newLabel into old label set, the set only keep one
-                            // so we don't need to add this label to either toBeRemoved* label set.
-                            // if we don't consider numEquivalent != (n+3) in the above 2 condistions, then
-                            // this equal label will be added to both toBeRemoved set and finally removed from label set.
-
-                            // if (PRINT_FOR_DEBUG)
-                            // {
-                            //     cout << "---------------------" << endl;
-                            //     printOneLabel(oldLabel, bigM);
-                            //     cout << "numEquivalent: " << numEquivalent << endl;
-                            // }
                         }
                     }
                     if (PRINT_FOR_DEBUG)
@@ -513,7 +574,10 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
 
                     //===> add the non-dominated labels to bigLambda_allNodesLableSet[succ]
                     for (auto &labelTemp : F_nodeSuccLabelSet)
+                    {
                         bigLambda_allNodesLableSet[succ].insert(labelTemp);
+                        newLabelSet[succ].insert(labelTemp);
+                    }
 
                     if (PRINT_FOR_DEBUG)
                     {

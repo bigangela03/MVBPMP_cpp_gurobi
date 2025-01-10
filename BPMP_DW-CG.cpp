@@ -44,8 +44,11 @@ int NUM_NODES;
 bool PRINT_FOR_DEBUG = false;
 
 bool USE_GA_FOR_INIT_SOL = false; // the experiment shows that a good initial solution doesn't reduce the number of iterations of sub-problem
+bool FORCE_TRIANGLE_INEQUALITY = true;
+bool USE_DOMINACE_METHOD_OR_SUB_PROBLEM = true; // if it is false, Gurobi will be used for pricing problem
 
-bool USE_DOMINACE_METHOD_OR_SUB_PROBLEM = false; // if it is false, Gurobi will be used for pricing problem
+bool testOneRouteObjAndDist = false;
+bool toRemove_addInitialSolutionInPricingProblem = false;
 
 // double bigM = 10000000;
 double epsilon = numeric_limits<double>::epsilon();
@@ -60,6 +63,7 @@ double epsilon = numeric_limits<double>::epsilon();
 //  }
 
 void reportTime(clock_t, auto);
+set<vector<int>> findTriangelInequalityViolation(double **, int);
 
 int main(int argc, char *argv[])
 {
@@ -147,6 +151,29 @@ int main(int argc, char *argv[])
 	printf("\n");
 
 	//================> end of reading data <================
+
+	if (FORCE_TRIANGLE_INEQUALITY)
+	{
+		cout << "==> FORCE_TRIANGLE_INEQUALITY: " << FORCE_TRIANGLE_INEQUALITY << endl;
+		set<vector<int>> TIV = findTriangelInequalityViolation(dis_v, n);
+		if (TIV.size() > 0)
+		{
+			for (auto &temp : TIV)
+			{
+				int tempSize = temp.size();
+				if (tempSize != 3)
+				{
+					printf("ERROR: TIV element always have vectors of size 3.");
+					exit(1);
+				}
+				// TIV:{i,j,k} d(i,j)+d(j,k)-d(i,k)<0
+				double tempDiff = dis_v[temp[0]][temp[1]] + dis_v[temp[1]][temp[2]] - dis_v[temp[0]][temp[2]];
+				dis_v[temp[0]][temp[2]] = dis_v[temp[0]][temp[2]] + tempDiff;
+			}
+		}
+		TIV = findTriangelInequalityViolation(dis_v, n);
+		printf("===> after modifying distance,TIV.size=%d\n", TIV.size());
+	}
 
 	GRBEnv *env = 0;
 
@@ -320,7 +347,6 @@ int main(int argc, char *argv[])
 		while (true)
 		{
 			printf("======== DW-CG Iteration %d ========\n", itrNum);
-
 			//*** the model is empty after I use model.relax()
 			// GRBModel relax = Master.relax ();
 			// relax.write ("dw-cg-relax.lp");
@@ -357,38 +383,116 @@ int main(int argc, char *argv[])
 
 			double pi_lambda_sum = lambdaSum[0].get(GRB_DoubleAttr_Pi);
 
+			// ===> set up the coefficient of x variables in objective function
+			vector<vector<double>> xCoeff(n, std::vector<double>(n));
+			for (i = 0; i < n - 1; i++)
+				for (j = 1; j < n; j++)
+				{
+					xCoeff[i][j] = 0; //===> for min obj problem
+					xCoeff[i][j] += cost * vw * dis_v[i][j];
+					xCoeff[i][j] -= capacity * pi[i][j];
+				}
+			// assigen big value to unaccesiable arc in case it is used in runDominance()
+			for (j = 0; j < n; j++)
+				xCoeff[n - 1][j] = 1000000;
+			for (i = 0; i < n; i++)
+				xCoeff[i][0] = 1000000;
+			// ===> end of setup
+
 			if (PRINT_FOR_DEBUG)
 				cout << "pi_lambda dual " << pi_lambda_sum << endl;
 
+			if (testOneRouteObjAndDist)
+			{
+				if (itrNum > 13)
+					exit(1);
+				if (itrNum == 13)
+				{
+					// printf("pi(0,3)=%lf\n", pi[0][3]);
+					// printf("pi(3,17)=%lf\n", pi[3][17]);
+					// printf("pi(17,7)=%lf\n", pi[17][4]);
+					// printf("pi(7,8)=%lf\n", pi[4][14]);
+					// printf("pi(13,19)=%lf\n", pi[14][19]);
+					// printf("d(0,3)=%lf\n", dis_v[0][3]);
+					// printf("d(3,17)=%lf\n", dis_v[3][17]);
+					// printf("d(17,7)=%lf\n", dis_v[17][7]);
+					// printf("d(8,13)=%lf\n", dis_v[8][13]);
+					// printf("d(13,19)=%lf\n", dis_v[13][19]);
+
+					printf("xCoeff(0,1)=%lf\n", xCoeff[0][1]);
+					printf("xCoeff(1,4)=%lf\n", xCoeff[1][4]);
+					printf("xCoeffv(4,9)=%lf\n", xCoeff[4][9]);
+					printf("xCoeff(0,7)=%lf\n", xCoeff[0][7]);
+					printf("xCoeff(7,1)=%lf\n", xCoeff[7][1]);
+					printf("d(0,1)=%lf\n", dis_v[0][1]);
+					printf("d(1,4)=%lf\n", dis_v[1][4]);
+					printf("d(4,9)=%lf\n", dis_v[4][9]);
+					printf("d(0,7)=%lf\n", dis_v[0][7]);
+					printf("d(7,1)=%lf\n", dis_v[7][1]);
+
+					// cout << "pi_lambda dual " << pi_lambda_sum << endl;
+					//===> print coefficients of x variables
+					printf("{{%lf,", xCoeff[0][0]);
+					for (int j = 1; j < n - 1; j++)
+						printf("%lf,", xCoeff[0][j]);
+					printf("%lf},\n", xCoeff[0][n - 1]);
+					for (int i = 1; i < n - 1; i++)
+					{
+						printf("{%lf,", xCoeff[i][0]);
+						for (int j = 1; j < n - 1; j++)
+							printf("%lf,", xCoeff[i][j]);
+						printf("%lf},\n", xCoeff[i][n - 1]);
+					}
+					printf("{%lf,", xCoeff[n - 1][0]);
+					for (int j = 1; j < n - 1; j++)
+						printf("%lf,", xCoeff[n - 1][j]);
+					printf("%lf}};\n", xCoeff[n - 1][n - 1]);
+					//===> end of printing coeff
+
+					// double disGurobi = dis_v[0][17] + dis_v[17][15] + dis_v[15][11] + dis_v[11][9] + dis_v[9][5] + dis_v[5][13] + dis_v[13][19];
+					// double objGurobi = -xCoeff[0][17] - xCoeff[17][15] - xCoeff[15][11] - xCoeff[11][9] - xCoeff[9][5] - xCoeff[5][13] - xCoeff[13][19] - pi_lambda_sum;
+
+					// double disDominance = dis_v[0][1] + dis_v[1][4] + dis_v[4][9];
+					// double objDominance = -xCoeff[0][1] - xCoeff[1][4] - xCoeff[4][9] - pi_lambda_sum;
+
+					// cout << "objGurobi=" << objGurobi << endl;
+					// cout << "disGurobi=" << disGurobi << endl;
+					// cout << "obj=" << objDominance << endl;
+					// cout << "dis=" << disDominance << endl;
+				}
+			}
+
 			//================> Pricing Problem <================
 			// double **sol = new double *[n];
+			double objValue_PP;
+
 			if (USE_DOMINACE_METHOD_OR_SUB_PROBLEM)
 			{
 
 				//===> the objective is to minimize value, so we get negative of the function used for Gurobi
-				// double **xCoeff = new double *[n];
+				// // double **xCoeff = new double *[n];
 
-				vector<vector<double>> xCoeff(n, std::vector<double>(n));
+				// vector<vector<double>> xCoeff(n, std::vector<double>(n));
 
-				for (i = 0; i < n - 1; i++)
-					for (j = 1; j < n; j++)
-					{
-						xCoeff[i][j] = 0;
-						xCoeff[i][j] += cost * vw * dis_v[i][j];
-						xCoeff[i][j] -= capacity * pi[i][j];
-					}
-				// assigen big value to unaccesiable arc in case it is used in runDominance()
-				for (j = 0; j < n; j++)
-					xCoeff[n - 1][j] = 1000000;
-				for (i = 0; i < n; i++)
-					xCoeff[i][0] = 1000000;
+				// for (i = 0; i < n - 1; i++)
+				// 	for (j = 1; j < n; j++)
+				// 	{
+				// 		xCoeff[i][j] = 0;
+				// 		xCoeff[i][j] += cost * vw * dis_v[i][j];
+				// 		xCoeff[i][j] -= capacity * pi[i][j];
+				// 	}
+				// // assigen big value to unaccesiable arc in case it is used in runDominance()
+				// for (j = 0; j < n; j++)
+				// 	xCoeff[n - 1][j] = 1000000;
+				// for (i = 0; i < n; i++)
+				// 	xCoeff[i][0] = 1000000;
 
 				//===> !!!!!! selectedRoute index starts from 0 !!!!!!
 				//===> for example, selectedRoute[0]=0, selectedRoute[1]=6, selectedRoute[2]=9
 				//===> it means the route is 1->7->10
 				// return the cost of the selected Route !!!
 				double disLimit = (double)route.DIS;
-				double objValue_PP;
+				// double objValue_PP;
 				// vector<int> selectedRoute = runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP);
 				vector<int> selectedRoute;
 				runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute);
@@ -397,20 +501,23 @@ int main(int argc, char *argv[])
 				objValue_PP = -objValue_PP;
 				printf("objective of Pricing problem (dominace): %lf\n", objValue_PP);
 
-				if (objValue_PP < 0.000001 && objValue_PP > -0.000001)
-				{
-					cout << "Optimum Found!" << endl;
+				// if (objValue_PP < 0.000001 && objValue_PP > -0.000001)
+				// {
+				// 	cout << "Optimum Found!" << endl;
 
-					convergePoint = objValue_master;
-					PPobj = objValue_PP;
-					break;
-				}
+				// 	convergePoint = objValue_master;
+				// 	PPobj = objValue_PP;
+
+				// 	printf("selected reoute: \n");
+				// 	for (i = 0; i < selectedRoute.size() - 1; i++)
+				// 		printf("%d->%d ", selectedRoute[i], selectedRoute[i + 1]);
+				// 	printf("\n");
+
+				// 	break;
+				// }
 				if (selectedRoute.size() > 1)
 				{
 					findSolutionInThisIteration = true;
-					// //===> set up dimension of sol array
-					// for (i = 0; i < n; i++)
-					// 	sol[i] = new double[n];
 
 					//===> pre-assign sol array value
 					for (i = 0; i < n; i++)
@@ -421,10 +528,18 @@ int main(int argc, char *argv[])
 					for (i = 0; i < selectedRoute.size() - 1; i++)
 						sol[selectedRoute[i]][selectedRoute[i + 1]] = 1;
 
-					cout << "selected reoute" << endl;
-					for (i = 0; i < selectedRoute.size() - 1; i++)
-						cout << selectedRoute[i] << "->" << selectedRoute[i + 1] << ", ";
-					cout << endl;
+					if (PRINT_FOR_DEBUG)
+					{
+						cout << "selected reoute" << endl;
+						for (i = 0; i < selectedRoute.size() - 1; i++)
+							cout << selectedRoute[i] << "->" << selectedRoute[i + 1] << ", ";
+						cout << endl;
+					}
+				}
+				else
+				{
+					printf("ERROR: after dominance method, there are at least two nodes in selected route!\n");
+					exit(1);
 				}
 			}
 			else
@@ -517,36 +632,63 @@ int main(int argc, char *argv[])
 					cout << "PP constraints added! \n";
 
 				// set objective
+				// GRBLinExpr obj = 0.0;
+				// for (i = 0; i < n - 1; i++)
+				// 	for (j = 1; j < n; j++)
+				// 	{
+				// 		obj -= cost * vw * dis_v[i][j] * x[i][j];
+				// 		obj += capacity * pi[i][j] * x[i][j];
+				// 	}
+				// obj -= pi_lambda_sum;
+				// PPmodel.setObjective(obj, GRB_MAXIMIZE);
+
 				GRBLinExpr obj = 0.0;
 				for (i = 0; i < n - 1; i++)
 					for (j = 1; j < n; j++)
 					{
-						obj -= cost * vw * dis_v[i][j] * x[i][j];
-						obj += capacity * pi[i][j] * x[i][j];
+						// obj += cost * vw * dis_v[i][j] * x[i][j];
+						// obj -= capacity * pi[i][j] * x[i][j];
+						obj += xCoeff[i][j] * x[i][j];
 					}
-				obj -= pi_lambda_sum;
-				PPmodel.setObjective(obj, GRB_MAXIMIZE);
+				obj += pi_lambda_sum;
+				PPmodel.setObjective(obj, GRB_MINIMIZE);
+
+				if (toRemove_addInitialSolutionInPricingProblem)
+				{
+					for (i = 0; i < n - 1; i++)
+						for (j = 1; j < n; j++)
+							x[i][j].set(GRB_DoubleAttr_Start, 0.0);
+
+					x[0][17].set(GRB_DoubleAttr_Start, 1);
+					x[17][3].set(GRB_DoubleAttr_Start, 1);
+					x[3][8].set(GRB_DoubleAttr_Start, 1);
+					x[8][10].set(GRB_DoubleAttr_Start, 1);
+					x[10][15].set(GRB_DoubleAttr_Start, 1);
+					x[15][19].set(GRB_DoubleAttr_Start, 1);
+				}
 
 				if (PRINT_FOR_DEBUG)
 					cout << "PP objective function is set up! \n";
 
 				PPmodel.getEnv().set(GRB_IntParam_OutputFlag, 0); // Silent Mode
+				PPmodel.set(GRB_DoubleParam_OptimalityTol, 1e-9); // Optimality tolerance
+
 				PPmodel.write("DW_pricingModel.lp");
 				PPmodel.optimize();
 
-				double objValue_PP = PPmodel.get(GRB_DoubleAttr_ObjVal);
-				cout << "objective of PP problem: " << objValue_PP << "\n";
+				// double objValue_PP = PPmodel.get(GRB_DoubleAttr_ObjVal);
+				objValue_PP = PPmodel.get(GRB_DoubleAttr_ObjVal);
 
-				// if (objValue_PP < 0.000001)
-				if (objValue_PP < 0.000001 && objValue_PP > -0.000001)
-				{
-					cout << "Optimum Found!" << endl;
+				objValue_PP = -objValue_PP;
+				cout << "objective of PP problem (gurobi): " << objValue_PP << "\n";
 
-					convergePoint = objValue_master;
-					PPobj = objValue_PP;
-
-					break;
-				}
+				// if (objValue_PP < 0.000001 && objValue_PP > -0.000001)
+				// {
+				// 	cout << "Optimum Found!" << endl;
+				// 	convergePoint = objValue_master;
+				// 	PPobj = objValue_PP;
+				// 	break;
+				// }
 
 				if (PPmodel.get(GRB_IntAttr_SolCount) > 0)
 				{
@@ -577,14 +719,14 @@ int main(int argc, char *argv[])
 						if (sol[i][j] > 0.999 && sol[i][j] < 1.001)
 							col.addTerm(-capacity, arcFlowCapacity[i][j]);
 
-				if (PRINT_FOR_DEBUG)
+				// if (PRINT_FOR_DEBUG)
 				{
-					printf("Selected arcs: \n");
+					printf("selected reoute: \n");
 					for (i = 0; i < n; i++)
 						for (j = 0; j < n; j++)
 							if (sol[i][j] > 0.999 && sol[i][j] < 1.001)
-								printf("sol[%d][%d]= %lf,  %d -- %d\n", i, j,
-									   sol[i][j], i + 1, j + 1);
+								printf("%d->%d ", i, j);
+					printf("\n");
 				}
 
 				// make a new column in lamdaSum constraint
@@ -610,7 +752,17 @@ int main(int argc, char *argv[])
 				exit(1);
 			}
 
-			Master.write("AddingVar.lp");
+			if (objValue_PP < 0.000001 && objValue_PP > -0.000001)
+			{
+				cout << "Optimum Found!" << endl;
+
+				convergePoint = objValue_master;
+				PPobj = objValue_PP;
+
+				break;
+			}
+
+			// Master.write("AddingVar.lp");
 
 			// if (itrNum >= 3)
 			// exit (1);
@@ -693,4 +845,25 @@ void reportTime(clock_t begin, auto beginWallClock)
 	auto endWallClock = high_resolution_clock::now();
 	auto elapsedWallClock = duration_cast<std::chrono::nanoseconds>(endWallClock - beginWallClock);
 	printf("Wall clock time: %.3f seconds.\n", elapsedWallClock.count() * 1e-9);
+}
+
+set<vector<int>> findTriangelInequalityViolation(double **dis_v, int n)
+{
+	set<vector<int>> TIV; // triangel inequality violation
+	for (int i = 0; i < n; i++)
+		for (int j = 0; j < n; j++)
+			for (int k = 0; k < n; k++)
+			{
+				double temp = dis_v[i][j] + dis_v[j][k] - dis_v[i][k];
+				if (temp < -0.0000000001)
+				{
+					vector<int> nodesTemp;
+					nodesTemp.push_back(i);
+					nodesTemp.push_back(j);
+					nodesTemp.push_back(k);
+					TIV.insert(nodesTemp);
+					printf("d(%d,%d)+d(%d,%d)-d(%d,%d)=%lf\n", i, j, j, k, i, k, temp);
+				}
+			}
+	return TIV;
 }
