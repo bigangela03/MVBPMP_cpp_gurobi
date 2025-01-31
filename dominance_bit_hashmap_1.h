@@ -1,5 +1,8 @@
-#ifndef DOMINANCE_H
-#define DOMINANCE_H
+#ifndef DOMINANCE_BIT_HASHMAP_H
+#define DOMINANCE_BIT_HASHMAP_H
+
+//!!!!!!!!!!!!!!!!!!! NOT WORKING !!!!!!!!!!!!!!!!!!!!!!!!!!
+// the data structre of hashmap is not working now!!!!!!!!!!!
 
 // This code is only for complete graph right now, i.e., any two nodes are connected
 // since I didn't consider the vertex incidence matrix, only iterate nodes from 0 to n-1
@@ -28,11 +31,12 @@
 #include <ctime>  //to measure CPU time
 #include <chrono> //to measure run time
 #include <unordered_map>
+#include <unordered_set>
 
 #include <limits> //to get the biggest value of double variables
 
-void printLabelSet(set<vector<double>>, double);
-void printOneLabel(vector<double>, double);
+void printLabelSet(&unordered_set<long>, &unordered_map<long, vector<int>>, &unordered_map<long, double>, &unordered_map<long, double>, int);
+void printOneLabel(long, &unordered_map<long, vector<int>>, &unordered_map<long, double>, &unordered_map<long, double>, int);
 bool compareToLabel(vector<double>, vector<double>, int, double);
 int checkIfLabelIsDominated(vector<double>, vector<double>, int);
 
@@ -42,21 +46,9 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
     //===> set up parameters used in dominance.h
     int startingNode = 0;
     int endingNode = n - 1;
-    bool PRINT_FOR_DEBUG = true;
-    double bigM = 10000000; // bigM has to be big enough, so than when checking domincated labels inside F set, when comparing two equivalent labels, it helps to find label with more bigM
+    bool PRINT_FOR_DEBUG = false;
+    int bigM = 10000000; // bigM has to be big enough, so than when checking domincated labels inside F set, when comparing two equivalent labels, it helps to find label with more bigM
     double verySmallNum = 0.0000001;
-
-    // vector<double> targetLabel;
-    // targetLabel.push_back(1);
-    // targetLabel.push_back(0);
-    // targetLabel.push_back(0);
-    // targetLabel.push_back(0);
-    // targetLabel.push_back(3);
-    // targetLabel.push_back(bigM);
-    // targetLabel.push_back(2);
-    // targetLabel.push_back(0);
-    // targetLabel.push_back(0);
-    // targetLabel.push_back(0);
 
     if (startingNode < 0 || startingNode > n - 1)
     {
@@ -69,22 +61,13 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
         exit(1);
     }
 
+    long *twoPow = new long[n];
+
+    for (int i = 0; i < n; i++)
+        twoPow[i] = 1 << i;
+
     if (PRINT_FOR_DEBUG)
         cout << "===> start dominace()" << endl;
-
-    //===> !!! we reorder the label for node i to (Vi1, Vi2, ..., Vin, si, Ti, Ci) so that
-    //!!! lable[0] to lable[n-1] represents visited nodes
-    //!!! lable[n] is the number of visited nodes;
-    //!!! label[n+1] is the consumed resouces;
-    //!!! lable[n+2] is the cost
-
-    //===> a label for node i is (Ti, si, Vi1, Vi2, ..., Vin, Ci) in Feillet etc paper
-    //"an exact algorithm for the elementary shortest path problem with resource constraints: application to some vehicle routing problems" in 2004
-    //===> Ti: the resource distance used
-    //===> si: the number of nodes visited
-    //===> Vij: 1, node j is visited; 0, node j is not visited
-    //===> Ci: the cost
-    //===> the length of a lable is 1+1+n+1=n+3
 
     if (PRINT_FOR_DEBUG)
     {
@@ -97,34 +80,61 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
         }
     }
 
-    vector<set<vector<double>>> bigLambda_allNodesLableSet;
+    vector<unordered_set<long>> bigLambda_allNodesLableSet;
+    unordered_map<long, vector<int>> routeMap;
+    unordered_map<long, double> distMap;
+    unordered_map<long, double> costMap;
+    unordered_map<long, double> numVisitedNodesMap;
 
     //===> initialize the lable for starting node
-    vector<double> oneLabel;
-    for (int i = 0; i < n + 3; i++)
-        oneLabel.push_back(0);
-    oneLabel[startingNode] = 1;
-    oneLabel[n] = 1;
+    // vector<double> oneLabel;
+    // for (int i = 0; i < n + 3; i++)
+    //     oneLabel.push_back(0);
+    // oneLabel[startingNode] = 1;
+    // oneLabel[n] = 1;
+    // set<vector<double>> startingNodeLables;
+    // startingNodeLables.insert(oneLabel);
 
-    set<vector<double>> startingNodeLables;
-    startingNodeLables.insert(oneLabel);
+    long B2Dtemp = twoPow[n - startingNode - 1]; // B2D, binary to decimal
+    distMap[B2Dtemp] = 0;
+    costMap[B2Dtemp] = 0;
+    numVisitedNodesMap[B2Dtemp] = 1;
+    vector<int> routeTemp;
+    for (int i = 0; i < n; i++)
+        routeTemp.push_back(0);
+    routeTemp[startingNode] = 1;
+    routeMap[B2Dtemp] = routeTemp;
+    unordered_set<long> startingNodeLables;
+    startingNodeLables.insert(B2Dtemp);
 
     //===> add empty lable set to all other nodes
+    // for (int i = 0; i < n; i++)
+    // {
+    //     if (i == startingNode)
+    //         bigLambda_allNodesLableSet.push_back(startingNodeLables);
+    //     else
+    //     {
+    //         set<vector<double>> emptySet;
+    //         bigLambda_allNodesLableSet.push_back(emptySet);
+    //     }
+    // }
+
     for (int i = 0; i < n; i++)
     {
         if (i == startingNode)
             bigLambda_allNodesLableSet.push_back(startingNodeLables);
         else
         {
-            set<vector<double>> emptySet;
+            unordered_set<long> emptySet;
             bigLambda_allNodesLableSet.push_back(emptySet);
         }
     }
 
     //===> initialize the newly added labels set as well
-    vector<set<vector<double>>> newLabelSet(bigLambda_allNodesLableSet);
+    // vector<set<vector<double>>> newLabelSet(bigLambda_allNodesLableSet);
+    vector<unordered_set<long>> newLabelSet(bigLambda_allNodesLableSet);
 
-    set<int> E_toBeTreatedNodesSet;
+    unordered_set<int> E_toBeTreatedNodesSet;
     E_toBeTreatedNodesSet.insert(startingNode);
 
     int itrNum = 0; // iteration number
@@ -144,11 +154,11 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
         }
 
         //===> only check the labels newly added in the last iteration
-        vector<set<vector<double>>> labelsAddedInLastIteration(newLabelSet);
+        vector<unordered_set<long>> labelsAddedInLastIteration(newLabelSet);
         for (int i = 0; i < newLabelSet.size(); i++)
             newLabelSet[i].clear();
 
-        set<int> E_toBeTreatedNodesSetCopy;
+        unordered_set<int> E_toBeTreatedNodesSetCopy;
 
         for (auto &node : E_toBeTreatedNodesSet)
             E_toBeTreatedNodesSetCopy.insert(node);
@@ -182,42 +192,40 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                 {
                     cout << "\nsucc=" << succ << " (itr " << itrNum << ", node " << node << ")" << endl;
                     cout << "===> bigLambda_allNodesLableSet[" << node << "].size =" << bigLambda_allNodesLableSet[node].size() << endl;
-                    printLabelSet(bigLambda_allNodesLableSet[node], bigM);
+                    printLabelSet(bigLambda_allNodesLableSet[node], distMap, costMap, bigM);
                     cout << "===> labelsAddedInLastIteration[" << node << "].size =" << labelsAddedInLastIteration[node].size() << endl;
-                    printLabelSet(labelsAddedInLastIteration[node], bigM);
+                    printLabelSet(labelsAddedInLastIteration[node], distMap, costMap, bigM);
                     cout << "===> newLabelSet[" << node << "].size =" << newLabelSet[node].size() << endl;
-                    printLabelSet(newLabelSet[node], bigM);
+                    printLabelSet(newLabelSet[node], distMap, costMap, bigM);
                 }
 
-                set<vector<double>> F_nodeSuccLabelSet; //===> LINE 11 in ESPPRC(p) PSEUDO-CODE
-                                                        // set<vector<double>> labelsOverDistLimit;
+                set<long> F_nodeSuccLabelSet; //===> LINE 11 in ESPPRC(p) PSEUDO-CODE
+                                              // set<vector<double>> labelsOverDistLimit;
 
                 for (auto &label : labelsAddedInLastIteration[node]) //===> LINE 12 in ESPPRC(p) PSEUDO-CODE
                 {
 
-                    if (label[succ] == 0) //===> LINE 13 in ESPPRC(p) PSEUDO-CODE
+                    // if (label[succ] == 0) //===> LINE 13 in ESPPRC(p) PSEUDO-CODE
+                    if (label | twoPow[succ] == 0) //===> LINE 13 in ESPPRC(p) PSEUDO-CODE
                     {
                         if (PRINT_FOR_DEBUG)
                         {
                             cout << "find a label not visit succ yet" << endl;
-                            printOneLabel(label, bigM);
+                            printOneLabel(label, distMap, costMap, bigM);
                         }
 
                         //===> LINE 14 in ESPPRC(p) PSEUDO-CODE
 
                         //===> check resource (distance)
-                        double currentDistance = label[n + 1];
+                        double currentDistance = distMap[label];
 
-                        // if (currentDistance + dis[node][succ] <= disLimit)
                         if (currentDistance + dis[node][succ] + dis[succ][endingNode] <= disLimit)
                         {
-                            vector<double> labelTemp;
-                            for (int i = 0; i < n + 3; i++)
-                                labelTemp.push_back(label[i]);
+                            long labelTemp = label;
 
-                            int numVisitedNodes = label[n];
-                            // labelTemp[succ] = 1;                                  //!!! lable[0] to lable[n-1] represents visited nodes
-                            labelTemp[succ] = numVisitedNodes + 1;
+                            int numVisitedNodes = numVisitedNodesMap[label];
+                            work here !!!!!!!!!!!!!!labelTemp[succ] = numVisitedNodes + 1;
+                            labelTemp += twoPow[n - succ - 1];
                             labelTemp[n] = numVisitedNodes + 1;                   //!!! lable[n] is the number of visited nodes;
                             labelTemp[n + 1] = currentDistance + dis[node][succ]; //!!! label[n+1] is the consumed resouces;
                             labelTemp[n + 2] = label[n + 2] + xCoeff[node][succ]; //!!! lable[n+2] is the cost
@@ -433,8 +441,10 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                             {
                                 cout << "new label: ";
                                 printOneLabel(newLabel, bigM);
+                                cout << endl;
                                 cout << "old label: ";
                                 printOneLabel(oldLabel, bigM);
+                                cout << endl;
                                 if (dominationResult == 1)
                                     cout << "Two labels are the same." << endl;
                                 else if (dominationResult == 2)
@@ -594,40 +604,34 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
     }
 }
 
-void printLabelSet(set<vector<double>> labelSet, double bigM)
+void printLabelSet(set<long> labelSet, &unordered_map<long, vector<int>> routeMap, &unordered_map<long, double> distMap, &unordered_map<long, double> costMap, double bigM)
 {
     for (auto &labelTemp : labelSet)
     {
-        for (auto &temp : labelTemp)
+        for (auto &temp : routeMap[labelTemp])
             // cout << fixed << setprecision(2) << temp << " ";
             if (temp == bigM)
                 cout << "M ";
             else
                 cout << temp << " ";
+        cout << cout << labelTemp << " ";
+        cout << distMap[labelTemp] << " ";
+        cout << costMap[labelTemp] << " ";
         cout << endl;
     }
 }
 
-void printOneLabel(vector<double> label, double bigM)
+work here !!!!!!!!!!!!!!!!!!void printOneLabel(long label, &unordered_map<long, double> distMap, &unordered_map<long, double> costMap, double bigM)
 {
-    for (auto &temp : label)
-        // cout << fixed << setprecision(2) << temp << " ";
-        if (temp == bigM)
-            cout << "M ";
-        else
-            cout << temp << " ";
+    // for (auto &temp : label)
+    // cout << fixed << setprecision(2) << temp << " ";
+    // if (temp == bigM)
+    //     cout << "M ";
+    // else
+    cout << label << " ";
+    cout << distMap[label] << " ";
+    cout << costMap[label] << " ";
     cout << endl;
-}
-
-bool compareToLabel(vector<double> lab, vector<double> target, int n, double verySmallNum)
-{
-    bool result = true;
-    for (int i = 0; i < n; i++)
-    {
-        if (lab[i] > target[i] + verySmallNum || lab[i] < target[i] - verySmallNum)
-            result = false;
-    }
-    return result;
 }
 
 int checkIfLabelIsDominated(vector<double> newLabel, vector<double> oldLabel, int n)

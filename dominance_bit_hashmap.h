@@ -1,8 +1,20 @@
-#ifndef DOMINACE_INACCESIBLENODE_H
-#define DOMINACE_INACCESIBLENODE_H
+#ifndef DOMINANCE_BIT_HASHMAP_H
+#define DOMINANCE_BIT_HASHMAP_H
+
+//!!!!!!!!!!!!!!!!!!! NOT WORKING !!!!!!!!!!!!!!!!!!!!!!!!!!
+//the data structre of hashmap is not working now!!!!!!!!!!!
+
+// I generate only one hashmap for all labels of all nodes; the hashmap maps key (binary representation of visited nodes to decimal) to visitited nodes, distance, and cost array.
+//  But there is a problem.
+// for a graph with node 0, 1, 2, ..., starting from node 0, at iteration 1, the label for node 1 is (1 1 0 ...0,d01,c01), label at node2 (1 0 1 0 ...0,d02,c02);
+// in iteration 2, check node 1 first, its successor node2 has new label (1 1 1 0...0,d01+d12,c01+c12); then check node2, its successor node1 has new label (1 1 1 0...1,d02+d21,c02+c21)
+// when generating keys, both (1 1 1 0...0,d01+d12,c01+c12) and (1 1 1 0...1,d02+d21,c02+c21) has the same key 2^(n-1)+2^(n-2)+2^(n-3)
+// when (1 1 1 0...1,d02+d21,c02+c21) is added, its key will replace the old key, which cause bugs
 
 // This code is only for complete graph right now, i.e., any two nodes are connected
 // since I didn't consider the vertex incidence matrix, only iterate nodes from 0 to n-1
+
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,35 +40,22 @@
 #include <ctime>  //to measure CPU time
 #include <chrono> //to measure run time
 #include <unordered_map>
+#include <unordered_set>
 
 #include <limits> //to get the biggest value of double variables
 
-void printLabelSet(set<vector<double>>, double);
-void printOneLabel(vector<double>, double);
-bool compareToLabel(vector<double>, vector<double>, int, double);
+void printLabelSet(unordered_set<long> &, unordered_map<long, vector<double>> &, double);
+void printOneLabel(vector<double> &, double);
 
-void
-// runDominace(int n, double **dis, double **xCoeff, double disLimit, double *)
-// runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit, double *obj)
-runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit, double *obj, vector<int> &nodesOnRoute)
+void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit, double *obj, vector<int> &nodesOnRoute)
 {
 
     //===> set up parameters used in dominance.h
+    int startingNode = 0;
+    int endingNode = n - 1;
     bool PRINT_FOR_DEBUG = true;
     double bigM = 10000000; // bigM has to be big enough, so than when checking domincated labels inside F set, when comparing two equivalent labels, it helps to find label with more bigM
     double verySmallNum = 0.0000001;
-
-    vector<double> targetLabel;
-    targetLabel.push_back(1);
-    targetLabel.push_back(0);
-    targetLabel.push_back(0);
-    targetLabel.push_back(0);
-    targetLabel.push_back(3);
-    targetLabel.push_back(bigM);
-    targetLabel.push_back(2);
-    targetLabel.push_back(0);
-    targetLabel.push_back(0);
-    targetLabel.push_back(0);
 
     if (PRINT_FOR_DEBUG)
         cout << "===> start dominace()" << endl;
@@ -86,9 +85,12 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
         }
     }
 
-    int startingNode = 0;
+    long *twoPow = new long[n];
+    for (int i = 0; i < n; i++)
+        twoPow[i] = 1 << i;
 
-    vector<set<vector<double>>> bigLambda_allNodesLableSet;
+    vector<unordered_set<long>> bigLambda_allNodesLableSet;
+    unordered_map<long, vector<double>> key2routeMap;
 
     //===> initialize the lable for starting node
     vector<double> oneLabel;
@@ -97,21 +99,28 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
     oneLabel[startingNode] = 1;
     oneLabel[n] = 1;
 
-    set<vector<double>> startingNodeLables;
-    startingNodeLables.insert(oneLabel);
+    unordered_set<long> startingNodeKeys;
+
+    long startingNodeKey = twoPow[n - startingNode - 1]; // B2D, binary to decimal
+    startingNodeKeys.insert(startingNodeKey);
+    key2routeMap[startingNodeKey] = oneLabel;
 
     //===> add empty lable set to all other nodes
     for (int i = 0; i < n; i++)
     {
         if (i == startingNode)
-            bigLambda_allNodesLableSet.push_back(startingNodeLables);
+            bigLambda_allNodesLableSet.push_back(startingNodeKeys);
         else
         {
-            set<vector<double>> emptySet;
+            unordered_set<long> emptySet;
             bigLambda_allNodesLableSet.push_back(emptySet);
         }
     }
 
+    //===> initialize the newly added labels set as well
+    vector<unordered_set<long>> newLabelSet(bigLambda_allNodesLableSet);
+
+    // unordered_set<int> E_toBeTreatedNodesSet;
     set<int> E_toBeTreatedNodesSet;
     E_toBeTreatedNodesSet.insert(startingNode);
 
@@ -121,7 +130,7 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
     {
         itrNum++;
 
-        // if (PRINT_FOR_DEBUG)
+        if (PRINT_FOR_DEBUG)
         {
             cout << endl;
             cout << "======> dominace iteration " << itrNum << " <======" << endl;
@@ -131,21 +140,29 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
             cout << endl;
         }
 
-        set<int> E_toBeTreatedNodesSetCopy;
+        //===> only check the labels newly added in the last iteration
+        vector<unordered_set<long>> labelsAddedInLastIteration(newLabelSet);
+        for (int i = 0; i < newLabelSet.size(); i++)
+            newLabelSet[i].clear();
 
-        for (auto &node : E_toBeTreatedNodesSet)
-            E_toBeTreatedNodesSetCopy.insert(node);
+        // unordered_set<int> E_toBeTreatedNodesSetCopy(E_toBeTreatedNodesSet);
+        set<int> E_toBeTreatedNodesSetCopy(E_toBeTreatedNodesSet);
 
         // clear the original node set, and add the node with change later
         E_toBeTreatedNodesSet.clear();
 
         for (auto &node : E_toBeTreatedNodesSetCopy) //===> LINE 9 in ESPPRC(p)
         {
+
+            if (labelsAddedInLastIteration[node].size() < 1)
+            {
+                printf("ERROR: There must be labels in E set!");
+                exit(1);
+            }
+
             // ===> ending node (n-1) has no successors
             if (node == n - 1)
-            {
                 continue;
-            }
 
             if (PRINT_FOR_DEBUG)
                 cout << "\n===> treaing node " << node << " in iteration " << itrNum << endl;
@@ -160,14 +177,20 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
                 {
                     cout << "\nsucc=" << succ << " (itr " << itrNum << ", node " << node << ")" << endl;
                     cout << "===> bigLambda_allNodesLableSet[" << node << "].size =" << bigLambda_allNodesLableSet[node].size() << endl;
-                    printLabelSet(bigLambda_allNodesLableSet[node], bigM);
+                    printLabelSet(bigLambda_allNodesLableSet[node], key2routeMap, bigM);
+                    cout << "===> labelsAddedInLastIteration[" << node << "].size =" << labelsAddedInLastIteration[node].size() << endl;
+                    printLabelSet(labelsAddedInLastIteration[node], key2routeMap, bigM);
+                    cout << "===> newLabelSet[" << node << "].size =" << newLabelSet[node].size() << endl;
+                    printLabelSet(newLabelSet[node], key2routeMap, bigM);
                 }
 
-                set<vector<double>> F_nodeSuccLabelSet; //===> LINE 11 in ESPPRC(p) PSEUDO-CODE
-                set<vector<double>> labelsOverDistLimit;
+                unordered_set<long> F_nodeSuccLabelSet; //===> LINE 11 in ESPPRC(p) PSEUDO-CODE
+                                                        // unordered_set<long> labelsOverDistLimit;
 
-                for (auto &label : bigLambda_allNodesLableSet[node]) //===> LINE 12 in ESPPRC(p) PSEUDO-CODE
+                for (auto &key : labelsAddedInLastIteration[node]) //===> LINE 12 in ESPPRC(p) PSEUDO-CODE
                 {
+
+                    vector<double> &label = key2routeMap[key];
 
                     if (label[succ] == 0) //===> LINE 13 in ESPPRC(p) PSEUDO-CODE
                     {
@@ -182,19 +205,21 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
                         //===> check resource (distance)
                         double currentDistance = label[n + 1];
 
-                        vector<double> labelTemp;
-                        for (int i = 0; i < n + 3; i++)
-                            labelTemp.push_back(label[i]);
-
-                        if (currentDistance + dis[node][succ] <= disLimit)
+                        if (currentDistance + dis[node][succ] + dis[succ][endingNode] <= disLimit)
                         {
+                            vector<double> labelTemp;
+                            for (int i = 0; i < n + 3; i++)
+                                labelTemp.push_back(label[i]);
+
                             int numVisitedNodes = label[n];
                             // labelTemp[succ] = 1;                                  //!!! lable[0] to lable[n-1] represents visited nodes
                             labelTemp[succ] = numVisitedNodes + 1;
                             labelTemp[n] = numVisitedNodes + 1;                   //!!! lable[n] is the number of visited nodes;
                             labelTemp[n + 1] = currentDistance + dis[node][succ]; //!!! label[n+1] is the consumed resouces;
                             labelTemp[n + 2] = label[n + 2] + xCoeff[node][succ]; //!!! lable[n+2] is the cost
-                            F_nodeSuccLabelSet.insert(labelTemp);
+                            long keyTemp = key + twoPow[n - succ - 1];
+                            F_nodeSuccLabelSet.insert(keyTemp);
+                            key2routeMap[keyTemp] = labelTemp;
 
                             if (PRINT_FOR_DEBUG)
                             {
@@ -206,7 +231,7 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
                         {
                             if (PRINT_FOR_DEBUG)
                                 cout << "distance is over limit" << endl;
-                            labelsOverDistLimit.insert(label);
+                            // labelsOverDistLimit.insert(label);
                         }
                     }
                 }
@@ -237,10 +262,6 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
                 //             printOneLabel(temp, bigM);
                 //         }
 
-                //         if (compareToLabel(temp, targetLabel, n, verySmallNum))
-                //         {
-                //             printf("==> target label is found in node %d for succ %d in iteration %d\n", node, succ, itrNum);
-                //         }
                 //     }
                 //     else
                 //     {
@@ -271,102 +292,52 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
                     {
                         cout << "# of labels in F set: " << F_nodeSuccLabelSet.size() << endl;
                         cout << "-> F set before removing dominated labels" << endl;
-                        printLabelSet(F_nodeSuccLabelSet, bigM);
+                        printLabelSet(F_nodeSuccLabelSet, key2routeMap, bigM);
                     }
 
-                    vector<vector<double>> Fset;
-                    for (auto &labelTemp : F_nodeSuccLabelSet)
-                    {
-                        vector<double> labelToAdd;
-                        for (auto &ele : labelTemp)
-                            labelToAdd.push_back(ele);
-                        Fset.push_back(labelToAdd);
-                    }
+                    // vector<vector<double>> Fset;
+                    // for (auto &labelTemp : F_nodeSuccLabelSet)
+                    // {
+                    //     vector<double> labelToAdd;
+                    //     for (auto &ele : labelTemp)
+                    //         labelToAdd.push_back(ele);
+                    //     Fset.push_back(labelToAdd);
+                    // }
 
-                    set<vector<double>> dominatedLabelsAmongNewLabelSet;
+                    unordered_set<long> dominatedLabelsAmongNewLabelSet;
 
-                    if (Fset.size() >= 2)
+                    // if (Fset.size() >= 2)
+                    if (F_nodeSuccLabelSet.size() >= 2)
                     { // since we are checking lables in a Set, so no labels are duplicate according to Set definition
-                        for (int i = 0; i < Fset.size(); i++)
-                        {
-                            for (int j = i + 1; j < Fset.size(); j++)
-                            {
-                                vector<double> label1 = Fset[i];
-                                vector<double> label2 = Fset[j];
-                                int numBiggerEleInlabel2 = 0;
-                                int numBiggerEleInlabel1 = 0;
-                                int numEquivalent = 0;
-                                int numExactlySame = 0;
-
-                                for (int i = 0; i < n; i++)
+                        // for (int i = 0; i < Fset.size(); i++)
+                        //     for (int j = i + 1; j < Fset.size(); j++)
+                        for (auto &key1 : F_nodeSuccLabelSet)
+                            for (auto &key2 : F_nodeSuccLabelSet)
+                                if (key1 != key2)
                                 {
-                                    // all scenarios: (1)new=0, old=0; (2) new=0, old=1,.,n,M; (3) new=1,2,..M, old=1,.,n,M
-                                    if ((label1[i] == 0 && label2[i] >= 0) || (label1[i] > 0 && label2[i] > 0))
-                                        numBiggerEleInlabel2++;
 
-                                    //===> when label[i]==M, it means that node i is not accessible since it is over distance limit
-                                    // but it is not visited, so when comparing with another label, M also means 0
-                                    if ((label1[i] == 0 && label2[i] == 0) || (label1[i] > 0 && label2[i] > 0) || (label1[i] == bigM && label2[i] == 0) || (label1[i] == 0 && label2[i] == bigM))
-                                        numEquivalent++;
+                                    vector<double> &oldLabel = key2routeMap[key1];
+                                    vector<double> &newLabel = key2routeMap[key2];
 
-                                    if ((label1[i] >= 0 && label2[i] == 0) || (label1[i] > 0 && label2[i] > 0))
-                                        numBiggerEleInlabel1++;
-
-                                    if (label1[i] == label2[i])
-                                        numExactlySame++;
+                                    if (!(newLabel[n + 1] <= oldLabel[n + 1] && newLabel[n + 2] <= oldLabel[n + 2]))     // old label is not dominated
+                                        if (!(newLabel[n + 1] >= oldLabel[n + 1] && newLabel[n + 2] >= oldLabel[n + 2])) // new label is not dominated
+                                            continue;
+                                    // now, at least one label has possibility to be dominated
+                                    long result = (key1 | key2);
+                                    if (result == key1)
+                                        dominatedLabelsAmongNewLabelSet.insert(key1);
+                                    else if (result == key2)
+                                        dominatedLabelsAmongNewLabelSet.insert(key2);
                                 }
-
-                                // check #of nodes visited, distance, and cost
-                                for (int i = n; i < n + 3; i++)
-                                {
-                                    if (label1[i] <= label2[i])
-                                        numBiggerEleInlabel2++;
-
-                                    if (label1[i] == label2[i])
-                                    {
-                                        numEquivalent++;
-                                        numExactlySame++;
-                                    }
-
-                                    if (label1[i] >= label2[i])
-                                        numBiggerEleInlabel1++;
-                                }
-
-                                if (numExactlySame == (n + 3))
-                                {
-                                    printf("ERROR: no duplicate lables are supoosed to be in a set!");
-                                    exit(1);
-                                }
-
-                                if (numBiggerEleInlabel1 == (n + 3) && numExactlySame != (n + 3) && numEquivalent != (n + 3))
-                                    dominatedLabelsAmongNewLabelSet.insert(label1);
-
-                                // if two labels are equivalent, only keeps the one which has more bigM
-                                if (numEquivalent == (n + 3))
-                                {
-                                    double sum1 = 0, sum2 = 0;
-                                    for (auto &ele : label1)
-                                        sum1 += ele;
-                                    for (auto &ele : label2)
-                                        sum2 += ele;
-
-                                    if (sum1 > sum2)
-
-                                        dominatedLabelsAmongNewLabelSet.insert(label2);
-                                    else
-                                        dominatedLabelsAmongNewLabelSet.insert(label1);
-                                }
-
-                                if (numBiggerEleInlabel2 == (n + 3) && numExactlySame != (n + 3) && numEquivalent != (n + 3))
-                                    dominatedLabelsAmongNewLabelSet.insert(label2);
-                            }
-                        }
                     }
 
                     //===> step (2)
                     //===> remove the dominated labels from F_nodeSuccLabelSet
-                    for (auto &labelTemp : dominatedLabelsAmongNewLabelSet)
-                        F_nodeSuccLabelSet.erase(labelTemp);
+                    for (auto &keyTemp : dominatedLabelsAmongNewLabelSet)
+                    {
+                        F_nodeSuccLabelSet.erase(keyTemp);
+                        // key2routeMap.erase(keyTemp);
+                    }
 
                     if (PRINT_FOR_DEBUG)
                     {
@@ -374,11 +345,11 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
                         {
                             cout << "-> dominatedLabelsAmongNewLabelSet" << endl;
 
-                            printLabelSet(dominatedLabelsAmongNewLabelSet, bigM);
+                            printLabelSet(dominatedLabelsAmongNewLabelSet, key2routeMap, bigM);
 
                             cout << "# of labels in F set after update: " << F_nodeSuccLabelSet.size() << endl;
                             cout << "-> F set after removing dominated labels" << endl;
-                            printLabelSet(F_nodeSuccLabelSet, bigM);
+                            printLabelSet(F_nodeSuccLabelSet, key2routeMap, bigM);
                         }
                         else
                             cout << "no dominated lables found among F set" << endl;
@@ -386,146 +357,100 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
 
                     //===> step (3)
 
-                    set<vector<double>> dominatedNewLabelSet;
-                    set<vector<double>> dominatedExistingLabelSet;
+                    unordered_set<long> dominatedNewLabelSet;
+                    unordered_set<long> dominatedExistingLabelSet;
 
-                    for (auto &newLabel : F_nodeSuccLabelSet)
+                    for (auto &newKey : F_nodeSuccLabelSet)
                     {
-                        // bool newLabelIsDominated = true;
-                        for (auto &oldLabel : bigLambda_allNodesLableSet[succ])
+
+                        // we can compare dist and cost first, if  not (d1>=d2, c1>=c2, or d1<=d2, c1<=c2), continue
+
+                        // then, use some other methods to decide, like if any element violates dominated conditin, then break, so we don't need to check all the elements in a label.
+
+                        for (auto &oldKey : bigLambda_allNodesLableSet[succ])
                         {
-
-                            int old_numBiggerOrEqual = 0;
-                            int new_numBiggerOrEqual = 0;
-                            // int numEquivalent = 0;
-                            int numExactlySame = 0;
-                            int numZeroBigMDiff = 0;
-                            int numDiff = 0;
-
-                            for (int i = 0; i < n; i++)
+                            if (PRINT_FOR_DEBUG)
                             {
-                                // all scenarios: (1)new=0, old>=0 (0,1,.,n,M); (2) new=1,2,..M, old=1,.,n,M; // not applicable (3) new=M, old=0
-                                // if ((newLabel[i] == 0 && oldLabel[i] >= 0) || (newLabel[i] > 0 && oldLabel[i] > 0) || (newLabel[i] == bigM && oldLabel[i] == 0))
-                                if ((newLabel[i] == 0 && oldLabel[i] >= 0) || (newLabel[i] > 0 && oldLabel[i] > 0))
-                                    old_numBiggerOrEqual++;
-
-                                //===> when label[i]==M, it means that node i is not accessible since it is over distance limit
-                                // but it is not visited, so when comparing with another label, M also means 0
-                                // if ((newLabel[i] == 0 && oldLabel[i] == 0) || (newLabel[i] > 0 && oldLabel[i] > 0) || (newLabel[i] == bigM && oldLabel[i] == 0) || (newLabel[i] == 0 && oldLabel[i] == bigM))
-                                //     numEquivalent++;
-
-                                if ((newLabel[i] >= 0 && oldLabel[i] == 0) || (newLabel[i] > 0 && oldLabel[i] > 0))
-                                    new_numBiggerOrEqual++;
-
-                                if (newLabel[i] == oldLabel[i])
-                                    numExactlySame++;
-
-                                if ((newLabel[i] == bigM && oldLabel[i] == 0) || (newLabel[i] == 0 && oldLabel[i] == bigM))
-                                    numZeroBigMDiff++;
-
-                                if (newLabel[i] != oldLabel[i])
-                                    numDiff++;
+                                cout << "new label key " << newKey << ": ";
+                                printOneLabel(key2routeMap[newKey], bigM);
+                                cout << "old label key " << oldKey << ": ";
+                                printOneLabel(key2routeMap[oldKey], bigM);
                             }
-
-                            // check #of nodes visited, distance, and cost
-                            for (int i = n; i < n + 3; i++)
+                            if (newKey != oldKey)
                             {
-                                if (newLabel[i] <= oldLabel[i])
-                                    old_numBiggerOrEqual++;
 
-                                if (newLabel[i] == oldLabel[i])
+                                vector<double> &oldLabel = key2routeMap[oldKey];
+                                vector<double> &newLabel = key2routeMap[newKey];
+
+                                if (!(newLabel[n + 1] <= oldLabel[n + 1] && newLabel[n + 2] <= oldLabel[n + 2]))     // old label is not dominated
+                                    if (!(newLabel[n + 1] >= oldLabel[n + 1] && newLabel[n + 2] >= oldLabel[n + 2])) // new label is not dominated
+                                        continue;
+                                // now, at least one label is dominated
+                                long result = (newKey | oldKey);
+                                if (result == newKey)
+                                    dominatedNewLabelSet.insert(newKey);
+                                else if (result == oldKey)
+                                    dominatedExistingLabelSet.insert(oldKey);
+                                if (PRINT_FOR_DEBUG)
                                 {
-                                    // numEquivalent++;
-                                    numExactlySame++;
+                                    if (result == newKey)
+                                        cout << "New label is dominated by old label." << endl;
+                                    else if (result == oldKey)
+                                        cout << "Old label is dominated." << endl;
                                 }
-
-                                if (newLabel[i] >= oldLabel[i])
-                                    new_numBiggerOrEqual++;
                             }
-
-                            // if new label is exactly the same as a lable in existing labels
-                            // then new label should be added in dominatedNewLabelSet and removed from F set
-                            // and keep the old label in succ's lable set
-                            // if (new_numBiggerOrEqual == (n + 3) && numExactlySame != (n + 3))
-                            if (new_numBiggerOrEqual == (n + 3))
-                                dominatedNewLabelSet.insert(newLabel);
-
-                            if (numZeroBigMDiff == numDiff)
-                            {
-                                dominatedNewLabelSet.insert(newLabel);
-                            }
-
-                            // if (numEquivalent == (n + 3))
-                            //     dominatedNewLabelSet.insert(newLabel);
-
-                            // if (old_numBiggerOrEqual == (n + 3) && numExactlySame != (n + 3) && numEquivalent != (n + 3))
-                            if (old_numBiggerOrEqual == (n + 3) && numExactlySame != (n + 3) && (numZeroBigMDiff != numDiff))
-                                dominatedExistingLabelSet.insert(oldLabel);
-
-                            // if(numEquivalent==(n+3)), it means oldLabel is the same as newLabel
-                            // when we add newLabel into old label set, the set only keep one
-                            // so we don't need to add this label to either toBeRemoved* label set.
-                            // if we don't consider numEquivalent != (n+3) in the above 2 condistions, then
-                            // this equal label will be added to both toBeRemoved set and finally removed from label set.
-
-                            // if (PRINT_FOR_DEBUG)
-                            // {
-                            //     cout << "---------------------" << endl;
-                            //     printOneLabel(oldLabel, bigM);
-                            //     cout << "numEquivalent: " << numEquivalent << endl;
-                            // }
+                            else
+                                // we need to add the same lable in dominated new labels to to remove it from F set later, so it won't be in the newly added labels in next iteration
+                                dominatedNewLabelSet.insert(newKey);
                         }
                     }
                     if (PRINT_FOR_DEBUG)
                     {
                         cout << "# of labels at succ node: " << bigLambda_allNodesLableSet[succ].size() << endl;
                         cout << "-> labels before update succ=" << succ << " labels" << endl;
-                        printLabelSet(bigLambda_allNodesLableSet[succ], bigM);
+                        printLabelSet(bigLambda_allNodesLableSet[succ], key2routeMap, bigM);
 
                         cout << "-> dominatedExistingLabelSet" << endl;
-                        printLabelSet(dominatedExistingLabelSet, bigM);
+                        printLabelSet(dominatedExistingLabelSet, key2routeMap, bigM);
 
                         cout << "-> dominatedNewLabelSet" << endl;
-                        printLabelSet(dominatedNewLabelSet, bigM);
+                        printLabelSet(dominatedNewLabelSet, key2routeMap, bigM);
 
                         cout << "-> F set before update" << endl;
-                        printLabelSet(F_nodeSuccLabelSet, bigM);
+                        printLabelSet(F_nodeSuccLabelSet, key2routeMap, bigM);
                     }
 
                     //===> step (4)
                     //===> remove the dominated labels for current and succsor nodes
-                    for (auto &labelTemp : dominatedExistingLabelSet)
-                        bigLambda_allNodesLableSet[succ].erase(labelTemp);
-                    for (auto &labelTemp : dominatedNewLabelSet)
-                        F_nodeSuccLabelSet.erase(labelTemp);
+                    for (auto &keyTemp : dominatedExistingLabelSet)
+                    {
+                        bigLambda_allNodesLableSet[succ].erase(keyTemp);
+                        // key2routeMap.erase(keyTemp);
+                    }
+                    for (auto &keyTemp : dominatedNewLabelSet)
+                    {
+                        F_nodeSuccLabelSet.erase(keyTemp);
+                        // key2routeMap.erase(keyTemp);
+                    }
 
                     //===> add the non-dominated labels to bigLambda_allNodesLableSet[succ]
-                    for (auto &labelTemp : F_nodeSuccLabelSet)
-                        bigLambda_allNodesLableSet[succ].insert(labelTemp);
+                    for (auto &keyTemp : F_nodeSuccLabelSet)
+                    {
+                        bigLambda_allNodesLableSet[succ].insert(keyTemp);
+                        newLabelSet[succ].insert(keyTemp);
+                    }
 
                     if (PRINT_FOR_DEBUG)
                     {
                         // cout << "======> ERROR: a conflict found!" << endl;
                         cout << "-> F_nodeSuccLabelSet" << endl;
-                        printLabelSet(F_nodeSuccLabelSet, bigM);
+                        printLabelSet(F_nodeSuccLabelSet, key2routeMap, bigM);
 
                         cout << "# of labels at succ node: " << bigLambda_allNodesLableSet[succ].size() << endl;
                         cout << "-> labels after update succ=" << succ << " labels" << endl;
-                        printLabelSet(bigLambda_allNodesLableSet[succ], bigM);
+                        printLabelSet(bigLambda_allNodesLableSet[succ], key2routeMap, bigM);
                     }
 
-                    // {
-                    //     for (auto &labTemp : F_nodeSuccLabelSet)
-                    //     {
-                    //         if (compareToLabel(labTemp, targetLabel, n, verySmallNum))
-                    //         {
-                    //             printf("==> target label is found in F_(%d,%d) in iteration %d\n", node, succ, itrNum);
-                    //         }
-                    //     }
-                    // }
-
-                    // if ((dominatedExistingLabelSet.size() != 0 && numEquivalent != dominatedExistingLabelSet.size()) || F_nodeSuccLabelSet.size() != 0) //===> LINE 16 in ESPPRC(p) PSEUDO-CODE
-                    // if (dominatedExistingLabelSet.size() != 0 || F_nodeSuccLabelSet.size() != 0) // this condition cause endless while loop
                     if (F_nodeSuccLabelSet.size() != 0) //===> LINE 16 in ESPPRC(p) PSEUDO-CODE//===> LINE 16 in ESPPRC(p) PSEUDO-CODE
                     {
                         E_toBeTreatedNodesSet.insert(succ); //===> LINE 17 in ESPPRC(p) PSEUDO-CODE
@@ -550,21 +475,20 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
     if (PRINT_FOR_DEBUG)
     {
         printf("\n-> the found visited nodes in label\n");
-        printLabelSet(bigLambda_allNodesLableSet[n - 1], bigM);
+        printLabelSet(bigLambda_allNodesLableSet[n - 1], key2routeMap, bigM);
     }
 
     double minCost = numeric_limits<double>::max();
     vector<double> bestLabel;
 
-    for (auto &labelTemp : bigLambda_allNodesLableSet[n - 1])
+    for (auto &keyTemp : bigLambda_allNodesLableSet[n - 1])
     {
+        vector<double> &labelTemp = key2routeMap[keyTemp];
         if (labelTemp[n + 2] < minCost)
         {
             bestLabel.clear();
             minCost = labelTemp[n + 2];
-
-            for (auto &ele : labelTemp)
-                bestLabel.push_back(ele);
+            bestLabel = labelTemp;
         }
     }
 
@@ -625,11 +549,11 @@ runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit
     }
 }
 
-void printLabelSet(set<vector<double>> labelSet, double bigM)
+void printLabelSet(unordered_set<long> &keySet, unordered_map<long, vector<double>> &key2routeMap, double bigM)
 {
-    for (auto &labelTemp : labelSet)
+    for (auto &key : keySet)
     {
-        for (auto &temp : labelTemp)
+        for (auto &temp : key2routeMap[key])
             // cout << fixed << setprecision(2) << temp << " ";
             if (temp == bigM)
                 cout << "M ";
@@ -639,7 +563,7 @@ void printLabelSet(set<vector<double>> labelSet, double bigM)
     }
 }
 
-void printOneLabel(vector<double> label, double bigM)
+void printOneLabel(vector<double> &label, double bigM)
 {
     for (auto &temp : label)
         // cout << fixed << setprecision(2) << temp << " ";
@@ -648,17 +572,6 @@ void printOneLabel(vector<double> label, double bigM)
         else
             cout << temp << " ";
     cout << endl;
-}
-
-bool compareToLabel(vector<double> lab, vector<double> target, int n, double verySmallNum)
-{
-    bool result = true;
-    for (int i = 0; i < n; i++)
-    {
-        if (lab[i] > target[i] + verySmallNum || lab[i] < target[i] - verySmallNum)
-            result = false;
-    }
-    return result;
 }
 
 #endif

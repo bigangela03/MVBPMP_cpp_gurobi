@@ -1,0 +1,40 @@
+with inaccessible nodes added, I let the nodes over distance limit M, but add in B2D (binary to decimal) as 1.
+
+But here is some problem.
+
+In output in dw-cg_10_1 output, we have
+
+  389 succ=8 (itr 2, node 7)
+  390 ===> bigLambda_allNodesLableSet[7].size =1
+  391 1 0 0 0 M 0 M 2 0 0 2 7.852 -1.318 556
+  392 find a label not visit succ yet
+  393 1 0 0 0 M 0 M 2 0 0 2 7.852 -1.318 556
+  394 visited number of nodes: labelTemp[n]=3
+  395 traveled distance: labelTemp[n + 1]=14.8
+  396 # of labels in F set: 1
+  397 -> F set
+  398 1 0 0 0 M 0 M 2 3 0 3 14.8 -2.3852 558
+
+  399 new label: 1 0 0 0 M 0 M 2 3 0 3 14.8 -2.3852 558
+  400 old label: 1 M M 0 M M M M 2 0 2 14.223 -2.5755 958
+  
+  401 # of labels at succ node: 2
+  402 -> labels before update succ=8 labels
+  403 1 M M 0 M M M M 2 0 2 14.223 -2.5755 958
+  404 1 0 0 0 M 0 M 2 3 0 3 14.8 -2.3852 558
+  405 -> F set before update
+  406 1 0 0 0 M 0 M 2 3 0 3 14.8 -2.3852 558
+  407 succ=8 is added int set E
+
+So try using two different B2D, one includes bigM, one doesn't
+
+ new label with bigM:    1 0 0 0 M 0 M 2 3 0 3 14.8 -2.3852 558
+ new label without bigM: 1 0 0 0 0 0 0 1 1 0 3 14.8 -2.3852 518 (2^9+2^2+2^1)
+
+ old label with bigM:    1 M M 0 M M M M 2 0 2 14.223 -2.5755 958
+ old label without bigM: 1 0 0 0 0 0 0 0 1 0 2 14.223 -2.5755 514 (2^9+2)
+
+ if we want to decide if new label is dominated by old label, after checking distance and cost,
+compare new label with bigM (558) and old label w/o bigM (514)
+
+

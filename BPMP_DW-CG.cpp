@@ -25,8 +25,17 @@
 #include "readData.h"
 // #include "ga_objfunc_greedy.h"
 #include "ga.h"
-#include "dominance.h"
-// #include "dominance_inaccesiblenode.h"
+// #include "dominance.h"
+#include "dominance_inab.h"
+// #include "dominance_inab_v0.h"
+// #include "dominance_inab_v1.h"
+
+// #include "dominance_doubleB2D.h"
+// #include "dominance_doubleB2D_vector.h"
+
+// #include "dominance_inaccessiblenode.h"
+// #include "dominance_bit_hashmap.h"
+// #include "dominance_bit_struct.h"
 
 // #include <omp.h>
 

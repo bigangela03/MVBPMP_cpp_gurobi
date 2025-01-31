@@ -1,5 +1,8 @@
-#ifndef DOMINANCE_H
-#define DOMINANCE_H
+#ifndef DOMINANCE_DOUBLEB2D_INAB_H
+#define DOMINANCE_DOUBLEB2D_INAB_H
+
+// this version is based on dominance.h, but it has (n+4) elements in a label, including B2D value at the end of label
+// dominance.h has only (n+3) elemens in a label.
 
 // This code is only for complete graph right now, i.e., any two nodes are connected
 // since I didn't consider the vertex incidence matrix, only iterate nodes from 0 to n-1
@@ -28,10 +31,32 @@
 #include <ctime>  //to measure CPU time
 #include <chrono> //to measure run time
 #include <unordered_map>
+#include <unordered_set>
 
 #include <limits> //to get the biggest value of double variables
 
-void printLabelSet(set<vector<double>>, double);
+struct VectorHash
+{
+    size_t operator()(const vector<double> &v) const
+    {
+        hash<double> hasher;
+        size_t seed = 0;
+        // for (double i : v)
+        // {
+        //     seed += hasher(i);
+        // }
+        int size = v.size();
+        // for (int i = 0; i < size - 4; i++)
+        // {
+        //     if (v[i] != 0)
+        //         seed += v[i];
+        // }
+        seed += hasher(v[size - 3]) + hasher(v[size - 2]) + hasher(v[size - 1]);
+        return seed;
+    }
+};
+
+void printLabelSet(unordered_set<vector<double>, VectorHash>, double);
 void printOneLabel(vector<double>, double);
 bool compareToLabel(vector<double>, vector<double>, int, double);
 int checkIfLabelIsDominated(vector<double>, vector<double>, int);
@@ -42,7 +67,7 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
     //===> set up parameters used in dominance.h
     int startingNode = 0;
     int endingNode = n - 1;
-    bool PRINT_FOR_DEBUG = true;
+    bool PRINT_FOR_DEBUG = false;
     double bigM = 10000000; // bigM has to be big enough, so than when checking domincated labels inside F set, when comparing two equivalent labels, it helps to find label with more bigM
     double verySmallNum = 0.0000001;
 
@@ -69,14 +94,20 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
         exit(1);
     }
 
+    long *twoPow = new long[n];
+
+    for (int i = 0; i < n; i++)
+        twoPow[i] = 1 << i;
+
     if (PRINT_FOR_DEBUG)
         cout << "===> start dominace()" << endl;
 
-    //===> !!! we reorder the label for node i to (Vi1, Vi2, ..., Vin, si, Ti, Ci) so that
-    //!!! lable[0] to lable[n-1] represents visited nodes
-    //!!! lable[n] is the number of visited nodes;
+    //===> !!! we reorder the label for node i to (Vi1, Vi2, ..., Vin, si, Ti, Ci, B2D) so that
+    //!!! label[0] to lable[n-1] represents visited nodes
+    //!!! label[n] is the number of visited nodes;
     //!!! label[n+1] is the consumed resouces;
-    //!!! lable[n+2] is the cost
+    //!!! label[n+2] is the cost
+    //!!! label[n+3] is the binary representation of the visited nodes B2D
 
     //===> a label for node i is (Ti, si, Vi1, Vi2, ..., Vin, Ci) in Feillet etc paper
     //"an exact algorithm for the elementary shortest path problem with resource constraints: application to some vehicle routing problems" in 2004
@@ -85,6 +116,7 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
     //===> Vij: 1, node j is visited; 0, node j is not visited
     //===> Ci: the cost
     //===> the length of a lable is 1+1+n+1=n+3
+    //===> add one more element B2D, the length is n+4 now
 
     if (PRINT_FOR_DEBUG)
     {
@@ -97,16 +129,17 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
         }
     }
 
-    vector<set<vector<double>>> bigLambda_allNodesLableSet;
+    vector<unordered_set<vector<double>, VectorHash>> bigLambda_allNodesLableSet;
 
     //===> initialize the lable for starting node
     vector<double> oneLabel;
-    for (int i = 0; i < n + 3; i++)
+    for (int i = 0; i < n + 4; i++)
         oneLabel.push_back(0);
     oneLabel[startingNode] = 1;
     oneLabel[n] = 1;
+    oneLabel[n + 3] = twoPow[n - startingNode - 1];
 
-    set<vector<double>> startingNodeLables;
+    unordered_set<vector<double>, VectorHash> startingNodeLables;
     startingNodeLables.insert(oneLabel);
 
     //===> add empty lable set to all other nodes
@@ -116,15 +149,15 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
             bigLambda_allNodesLableSet.push_back(startingNodeLables);
         else
         {
-            set<vector<double>> emptySet;
+            unordered_set<vector<double>, VectorHash> emptySet;
             bigLambda_allNodesLableSet.push_back(emptySet);
         }
     }
 
     //===> initialize the newly added labels set as well
-    vector<set<vector<double>>> newLabelSet(bigLambda_allNodesLableSet);
+    vector<unordered_set<vector<double>, VectorHash>> newLabelSet(bigLambda_allNodesLableSet);
 
-    set<int> E_toBeTreatedNodesSet;
+    unordered_set<int> E_toBeTreatedNodesSet;
     E_toBeTreatedNodesSet.insert(startingNode);
 
     int itrNum = 0; // iteration number
@@ -144,14 +177,11 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
         }
 
         //===> only check the labels newly added in the last iteration
-        vector<set<vector<double>>> labelsAddedInLastIteration(newLabelSet);
+        vector<unordered_set<vector<double>, VectorHash>> labelsAddedInLastIteration(newLabelSet);
         for (int i = 0; i < newLabelSet.size(); i++)
             newLabelSet[i].clear();
 
-        set<int> E_toBeTreatedNodesSetCopy;
-
-        for (auto &node : E_toBeTreatedNodesSet)
-            E_toBeTreatedNodesSetCopy.insert(node);
+        unordered_set<int> E_toBeTreatedNodesSetCopy(E_toBeTreatedNodesSet);
 
         // clear the original node set, and add the node with change later
         E_toBeTreatedNodesSet.clear();
@@ -189,8 +219,8 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                     printLabelSet(newLabelSet[node], bigM);
                 }
 
-                set<vector<double>> F_nodeSuccLabelSet; //===> LINE 11 in ESPPRC(p) PSEUDO-CODE
-                                                        // set<vector<double>> labelsOverDistLimit;
+                unordered_set<vector<double>, VectorHash> F_nodeSuccLabelSet; //===> LINE 11 in ESPPRC(p) PSEUDO-CODE
+                                                                              // set<vector<double>> labelsOverDistLimit;
 
                 for (auto &label : labelsAddedInLastIteration[node]) //===> LINE 12 in ESPPRC(p) PSEUDO-CODE
                 {
@@ -211,22 +241,46 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                         // if (currentDistance + dis[node][succ] <= disLimit)
                         if (currentDistance + dis[node][succ] + dis[succ][endingNode] <= disLimit)
                         {
-                            vector<double> labelTemp;
-                            for (int i = 0; i < n + 3; i++)
-                                labelTemp.push_back(label[i]);
 
-                            int numVisitedNodes = label[n];
-                            // labelTemp[succ] = 1;                                  //!!! lable[0] to lable[n-1] represents visited nodes
-                            labelTemp[succ] = numVisitedNodes + 1;
-                            labelTemp[n] = numVisitedNodes + 1;                   //!!! lable[n] is the number of visited nodes;
-                            labelTemp[n + 1] = currentDistance + dis[node][succ]; //!!! label[n+1] is the consumed resouces;
-                            labelTemp[n + 2] = label[n + 2] + xCoeff[node][succ]; //!!! lable[n+2] is the cost
-                            F_nodeSuccLabelSet.insert(labelTemp);
+                            double distTemp = currentDistance + dis[node][succ]; //!!! label[n+1] is the consumed resouces;
+                            double costTemp = label[n + 2] + xCoeff[node][succ]; //!!! lable[n+2] is the cost
+                            double B2Dtemp = label[n + 3] + twoPow[n - succ - 1];
 
-                            if (PRINT_FOR_DEBUG)
+                            // check if it is dominated
+                            bool dominatedTemp = false;
+                            for (const auto &oldLabel : F_nodeSuccLabelSet)
                             {
-                                cout << "visited number of nodes: labelTemp[n]=" << labelTemp[n] << endl;
-                                cout << "traveled distance: labelTemp[n + 1]=" << labelTemp[n + 1] << endl;
+                                if (distTemp >= oldLabel[n + 1] && costTemp >= oldLabel[n + 2])
+                                    if (((long)B2Dtemp | (long)oldLabel[n + 3]) == B2Dtemp)
+                                    {
+                                        dominatedTemp = true;
+                                        break;
+                                    }
+                            }
+                            if (!dominatedTemp)
+                            {
+                                vector<double> labelTemp;
+                                for (int i = 0; i < n + 4; i++)
+                                    labelTemp.push_back(label[i]);
+
+                                int numVisitedNodes = label[n];
+                                // labelTemp[succ] = 1;                                  //!!! lable[0] to lable[n-1] represents visited nodes
+                                labelTemp[succ] = numVisitedNodes + 1;
+                                labelTemp[n] = numVisitedNodes + 1; //!!! lable[n] is the number of visited nodes;
+                                labelTemp[n + 1] = distTemp;        //!!! label[n+1] is the consumed resouces;
+                                labelTemp[n + 2] = costTemp;        //!!! lable[n+2] is the cost
+                                labelTemp[n + 3] = B2Dtemp;
+                                F_nodeSuccLabelSet.insert(labelTemp);
+
+                                if (PRINT_FOR_DEBUG)
+                                {
+                                    cout << "visited number of nodes: labelTemp[n]=" << labelTemp[n] << endl;
+                                    cout << "traveled distance: labelTemp[n + 1]=" << labelTemp[n + 1] << endl;
+
+                                    cout << "# of labels in F set: " << F_nodeSuccLabelSet.size() << endl;
+                                    cout << "-> F set" << endl;
+                                    printLabelSet(F_nodeSuccLabelSet, bigM);
+                                }
                             }
                         }
                         else
@@ -293,123 +347,73 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                     // EFF() step (3): compare labels of old and updated new-label-set without dominated ones
                     // EFF() step (4): remove dominated labels from old and updated new-label-set
 
-                    //===> step (1)
-                    if (PRINT_FOR_DEBUG)
-                    {
-                        cout << "# of labels in F set: " << F_nodeSuccLabelSet.size() << endl;
-                        cout << "-> F set before removing dominated labels" << endl;
-                        printLabelSet(F_nodeSuccLabelSet, bigM);
-                    }
+                    // //===> step (1)
+                    // if (PRINT_FOR_DEBUG)
+                    // {
+                    //     cout << "# of labels in F set: " << F_nodeSuccLabelSet.size() << endl;
+                    //     cout << "-> F set before removing dominated labels" << endl;
+                    //     printLabelSet(F_nodeSuccLabelSet, bigM);
+                    // }
 
-                    vector<vector<double>> Fset;
-                    for (auto &labelTemp : F_nodeSuccLabelSet)
-                    {
-                        vector<double> labelToAdd;
-                        for (auto &ele : labelTemp)
-                            labelToAdd.push_back(ele);
-                        Fset.push_back(labelToAdd);
-                    }
+                    // vector<vector<double>> Fset;
+                    // for (auto &labelTemp : F_nodeSuccLabelSet)
+                    // {
+                    //     vector<double> labelToAdd;
+                    //     for (auto &ele : labelTemp)
+                    //         labelToAdd.push_back(ele);
+                    //     Fset.push_back(labelToAdd);
+                    // }
 
-                    set<vector<double>> dominatedLabelsAmongNewLabelSet;
+                    // set<vector<double>> dominatedLabelsAmongNewLabelSet;
 
-                    if (Fset.size() >= 2)
-                    { // since we are checking lables in a Set, so no labels are duplicate according to Set definition
-                        for (int i = 0; i < Fset.size(); i++)
-                            for (int j = i + 1; j < Fset.size(); j++)
-                            {
+                    // if (Fset.size() >= 2)
+                    // { // since we are checking lables in a Set, so no labels are duplicate according to Set definition
+                    //     for (int i = 0; i < Fset.size(); i++)
+                    //         for (int j = i + 1; j < Fset.size(); j++)
+                    //         {
 
-                                vector<double> label1 = Fset[i];
-                                vector<double> label2 = Fset[j];
+                    //             vector<double> label1 = Fset[i];
+                    //             vector<double> label2 = Fset[j];
 
-                                // bool label1Dominated = true;
-                                // bool label2Dominated = true;
+                    //             int dominationResult = checkIfLabelIsDominated(label1, label2, n);
+                    //             // 1. both are dominated, which means they are the same 2. only newLabel is dominated; 3. only oldLabel is dominated;
+                    //             if (dominationResult == 1)
+                    //             {
+                    //                 printf("ERROR: two lables can't be the same in a set!");
+                    //                 exit(1);
+                    //             }
+                    //             else if (dominationResult == 2)
+                    //                 dominatedLabelsAmongNewLabelSet.insert(label1);
+                    //             else if (dominationResult == 3)
+                    //                 dominatedLabelsAmongNewLabelSet.insert(label2);
+                    //         }
+                    // }
 
-                                // if (!(label1[n + 1] <= label2[n + 1] && label1[n + 2] <= label2[n + 2]))
-                                // {
-                                //     label2Dominated = false;
-                                //     if (!(label1[n + 1] >= label2[n + 1] && label1[n + 2] >= label2[n + 2])) // new label is not dominated
-                                //         continue;
-                                // }
-                                // else // old label is dominated
-                                // {
-                                //     // new label is not dominated
-                                //     if (!(label1[n + 1] >= label2[n + 1] && label1[n + 2] >= label2[n + 2]))
-                                //         label1Dominated = false;
-                                // }
-                                // // if both new label and old label are dominated, they are the same
+                    // //===> step (2)
+                    // //===> remove the dominated labels from F_nodeSuccLabelSet
+                    // for (auto &labelTemp : dominatedLabelsAmongNewLabelSet)
+                    //     F_nodeSuccLabelSet.erase(labelTemp);
 
-                                // // keep checking other elements in the label
-                                // if (label1Dominated)
-                                //     if (label1[n] < label2[n]) // check the number of visted nodes first
-                                //         continue;
-                                //     else // then check each node
-                                //         for (int i = 0; i < n; i++)
-                                //             if (label1[i] < label2[i])
-                                //             {
-                                //                 label1Dominated = false;
-                                //                 break;
-                                //             }
+                    // if (PRINT_FOR_DEBUG)
+                    // {
+                    //     if (dominatedLabelsAmongNewLabelSet.size() > 0)
+                    //     {
+                    //         cout << "-> dominatedLabelsAmongNewLabelSet" << endl;
 
-                                // if (label2Dominated)
-                                //     if (label2[n] < label1[n]) // check the number of visted nodes first
-                                //         continue;
-                                //     else // then check each node
-                                //         for (int i = 0; i < n; i++)
-                                //             if (label2[i] < label1[i])
-                                //             {
-                                //                 label2Dominated = false;
-                                //                 break;
-                                //             }
+                    //         printLabelSet(dominatedLabelsAmongNewLabelSet, bigM);
 
-                                // // we are checking labels in a set, so this scenario doesn't happen
-                                // if (label1Dominated && label2Dominated) // two lables are the same
-                                //     dominatedLabelsAmongNewLabelSet.insert(label1);
-
-                                // if (label1Dominated && !label2Dominated)
-                                //     dominatedLabelsAmongNewLabelSet.insert(label1);
-
-                                // if (!label1Dominated && label2Dominated)
-                                //     dominatedLabelsAmongNewLabelSet.insert(label2);
-
-                                int dominationResult = checkIfLabelIsDominated(label1, label2, n);
-                                // 1. both are dominated, which means they are the same 2. only newLabel is dominated; 3. only oldLabel is dominated;
-                                if (dominationResult == 1)
-                                {
-                                    printf("ERROR: two lables can't be the same in a set!");
-                                    exit(1);
-                                }
-                                else if (dominationResult == 2)
-                                    dominatedLabelsAmongNewLabelSet.insert(label1);
-                                else if (dominationResult == 3)
-                                    dominatedLabelsAmongNewLabelSet.insert(label2);
-                            }
-                    }
-
-                    //===> step (2)
-                    //===> remove the dominated labels from F_nodeSuccLabelSet
-                    for (auto &labelTemp : dominatedLabelsAmongNewLabelSet)
-                        F_nodeSuccLabelSet.erase(labelTemp);
-
-                    if (PRINT_FOR_DEBUG)
-                    {
-                        if (dominatedLabelsAmongNewLabelSet.size() > 0)
-                        {
-                            cout << "-> dominatedLabelsAmongNewLabelSet" << endl;
-
-                            printLabelSet(dominatedLabelsAmongNewLabelSet, bigM);
-
-                            cout << "# of labels in F set after update: " << F_nodeSuccLabelSet.size() << endl;
-                            cout << "-> F set after removing dominated labels" << endl;
-                            printLabelSet(F_nodeSuccLabelSet, bigM);
-                        }
-                        else
-                            cout << "no dominated lables found among F set" << endl;
-                    }
+                    //         cout << "# of labels in F set after update: " << F_nodeSuccLabelSet.size() << endl;
+                    //         cout << "-> F set after removing dominated labels" << endl;
+                    //         printLabelSet(F_nodeSuccLabelSet, bigM);
+                    //     }
+                    //     else
+                    //         cout << "no dominated lables found among F set" << endl;
+                    // }
 
                     //===> step (3)
 
-                    set<vector<double>> dominatedNewLabelSet;
-                    set<vector<double>> dominatedExistingLabelSet;
+                    unordered_set<vector<double>, VectorHash> dominatedNewLabelSet;
+                    unordered_set<vector<double>, VectorHash> dominatedExistingLabelSet;
 
                     for (auto &newLabel : F_nodeSuccLabelSet)
                     {
@@ -420,14 +424,28 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
 
                         for (auto &oldLabel : bigLambda_allNodesLableSet[succ])
                         {
-                            int dominationResult = checkIfLabelIsDominated(newLabel, oldLabel, n);
-                            // 1. both are dominated, which means they are the same 2. only newLabel is dominated; 3. only oldLabel is dominated;
-                            if (dominationResult == 1)
-                                dominatedNewLabelSet.insert(newLabel);
-                            else if (dominationResult == 2)
-                                dominatedNewLabelSet.insert(newLabel);
-                            else if (dominationResult == 3)
-                                dominatedExistingLabelSet.insert(oldLabel);
+                            if (newLabel[n + 1] >= oldLabel[n + 1] && newLabel[n + 2] >= oldLabel[n + 2])
+                            {
+                                long result = ((long)newLabel[n + 3] | (long)oldLabel[n + 3]);
+                                if (result == newLabel[n + 3])
+                                {
+                                    dominatedNewLabelSet.insert(newLabel);
+
+                                    if (PRINT_FOR_DEBUG)
+                                        cout << "new label is dominated" << endl;
+                                }
+                            } // in case that old and new labels are the same, then only add in dominatedNewLabelSet
+                            else if (newLabel[n + 1] <= oldLabel[n + 1] && newLabel[n + 2] <= oldLabel[n + 2]) // old label is possible to be dominated
+                            {
+                                long result = ((long)newLabel[n + 3] | (long)oldLabel[n + 3]);
+                                if (result == oldLabel[n + 3])
+                                {
+                                    dominatedExistingLabelSet.insert(oldLabel);
+
+                                    if (PRINT_FOR_DEBUG)
+                                        cout << "new label is dominated" << endl;
+                                }
+                            }
 
                             if (PRINT_FOR_DEBUG)
                             {
@@ -435,12 +453,6 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                                 printOneLabel(newLabel, bigM);
                                 cout << "old label: ";
                                 printOneLabel(oldLabel, bigM);
-                                if (dominationResult == 1)
-                                    cout << "Two labels are the same." << endl;
-                                else if (dominationResult == 2)
-                                    cout << "New label is dominated by old label." << endl;
-                                else if (dominationResult == 3)
-                                    cout << "Old label is dominated." << endl;
                             }
                         }
                     }
@@ -594,7 +606,7 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
     }
 }
 
-void printLabelSet(set<vector<double>> labelSet, double bigM)
+void printLabelSet(unordered_set<vector<double>, VectorHash> labelSet, double bigM)
 {
     for (auto &labelTemp : labelSet)
     {
@@ -654,34 +666,16 @@ int checkIfLabelIsDominated(vector<double> newLabel, vector<double> oldLabel, in
     // here, at least one is true:
     //  if both new label and old label are dominated, they are the same
 
-    // keep checking other elements in the label
-    if (newLabelDominated)
-        // if (newLabel[n] < oldLabel[n]) // check the number of visted nodes first
-        //     return returnValue;
-        // else // then check each node
-        //     for (int i = 0; i < n; i++)
-        //         if (newLabel[i] < oldLabel[i])
-        //         {
-        //             newLabelDominated = false;
-        //             break;
-        //         }
-        for (int i = n; i >= 0; i--) // check label[n]first, which is the number of visited nodes
-            if (newLabel[i] < oldLabel[i])
-            {
-                newLabelDominated = false;
-                break;
-            }
+    long newB2D = (long)newLabel[n + 3];
+    long oldB2D = (long)oldLabel[n + 3];
+    long result = newB2D | oldB2D;
 
-    if (oldLabelDominated)
-        if (oldLabel[n] < newLabel[n]) // check the number of visted nodes first
-            return returnValue;
-        else
-            for (int i = 0; i < n; i++)
-                if (oldLabel[i] < newLabel[i])
-                {
-                    oldLabelDominated = false;
-                    break;
-                }
+    // keep checking other elements in the label
+
+    if (newLabelDominated && (result != newB2D))
+        newLabelDominated = false;
+    if (oldLabelDominated && (result != oldB2D))
+        oldLabelDominated = false;
 
     if (newLabelDominated && oldLabelDominated) // two lables are the same
         returnValue = 1;
