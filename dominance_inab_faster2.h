@@ -1,6 +1,9 @@
-#ifndef DOMINANCE_INAB_H
-#define DOMINANCE_INAB_H
+#ifndef DOMINANCE_INAB_FASTER2_H
+#define DOMINANCE_INAB_FASTER2_H
 
+//// tried removing the labels when B2Dinab (B2D considers the inaccessible nodes) is all ones, it but it runs very slow, so it's dropped.
+// this version only stores the newly added labels in this and lastiteration at nodes exepct starting and ending nodes.
+// this version is based on dominance_inab.h. It dropped F set which includes all the newly added labels at the successor, and do the comparison while generating the new label.
 // this version introduce bigM in labels
 
 // this version dropped vector<vector<vector<double>>> newLabelSet, but only use vector<int>numNewlyAddedLabels (and vector<int> numNewlyAddedInLastIteration),
@@ -48,13 +51,15 @@ void printLabelSet(vector<vector<double>>, double);
 void printOneLabel(vector<double>, double);
 bool compareToLabel(vector<double>, vector<double>, int, double);
 
-void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit, double *obj, vector<int> &nodesOnRoute)
+// using nodeNeighbors slow down the running compared with succ=0 to n-1, we can actually drop nodeNeighbors
+// void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit, double *obj, vector<int> &nodesOnRoute, int startingNode, int endingNode, vector<vector<int>> &nodeNeighbors)
+void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit, double *obj, vector<int> &nodesOnRoute, int startingNode, int endingNode)
 {
 
     //===> set up parameters used in dominance.h
-    int startingNode = 0;
-    int endingNode = n - 1;
-    bool PRINT_FOR_DEBUG = true;
+    // int startingNode = 0;
+    // int endingNode = n - 1;
+    bool PRINT_FOR_DEBUG = false;
     double bigM = 10000000; // bigM has to be big enough, so than when checking domincated labels inside F set, when comparing two equivalent labels, it helps to find label with more bigM
     double verySmallNum = 0.0000001;
 
@@ -191,12 +196,6 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
         for (auto &node : E_toBeTreatedNodesSetCopy) //===> LINE 9 in ESPPRC(p)
         {
 
-            // if (labelsAddedInLastIteration[node].size() < 1)
-            // {
-            //     printf("ERROR: There must be labels in E set!");
-            //     exit(1);
-            // }
-
             // ===> ending node (n-1) has no successors
             if (node == n - 1)
                 continue;
@@ -204,24 +203,21 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
             if (PRINT_FOR_DEBUG)
                 cout << "\n===> treaing node " << node << " in iteration " << itrNum << endl;
 
+            // for (auto &succ : nodeNeighbors[node]) //using nodeNeighbors slow down the running compared with succ=0 to n-1
             for (int succ = 0; succ < n; succ++) //===> LINE 10 in ESPPRC(p)
             {
-                // ===> there are arcs only out of startingNode
-                if (succ == startingNode || succ == node)
-                    continue;
+                // // ===> there are arcs only out of startingNode
+                // if (succ == startingNode || succ == node)
+                //     continue;
 
                 if (PRINT_FOR_DEBUG)
                 {
                     cout << "\nsucc=" << succ << " (itr " << itrNum << ", node " << node << ")" << endl;
                     cout << "===> bigLambda_allNodesLableSet[" << node << "].size =" << bigLambda_allNodesLableSet[node].size() << endl;
                     printLabelSet(bigLambda_allNodesLableSet[node], bigM);
-                    // cout << "===> labelsAddedInLastIteration[" << node << "].size =" << labelsAddedInLastIteration[node].size() << endl;
-                    // printLabelSet(labelsAddedInLastIteration[node], bigM);
-                    // cout << "===> newLabelSet[" << node << "].size =" << newLabelSet[node].size() << endl;
-                    // printLabelSet(newLabelSet[node], bigM);
                 }
 
-                vector<vector<double>> F_nodeSuccLabelSet; //===> LINE 11 in ESPPRC(p) PSEUDO-CODE
+                // vector<vector<double>> F_nodeSuccLabelSet; //===> LINE 11 in ESPPRC(p) PSEUDO-CODE
 
                 int nodeLabelSize = bigLambda_allNodesLableSet[node].size();
 
@@ -251,18 +247,68 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                             double B2Dtemp = label[n + 3] + twoPow[n - succ - 1];
                             double B2Dinabtemp = label[n + 4] + twoPow[n - succ - 1];
 
-                            // check if it is dominated by any label in F set
                             bool dominatedTemp = false;
-                            for (const auto &oldLabel : F_nodeSuccLabelSet)
                             {
-                                if (distTemp >= oldLabel[n + 1] && costTemp >= oldLabel[n + 2])
-                                    // if (((long)B2Dtemp | (long)oldLabel[n + 3]) == B2Dtemp)
-                                    if (((long)B2Dinabtemp | (long)oldLabel[n + 3]) == B2Dinabtemp)
+                                int oldLabelVecIndex = 0;
+                                for (auto oldLabelIt = bigLambda_allNodesLableSet[succ].begin(); oldLabelIt != bigLambda_allNodesLableSet[succ].end();)
+                                {
+                                    int oldLabelSize = bigLambda_allNodesLableSet[succ].size();
+
+                                    long B2DinabTempLong = (long)B2Dinabtemp;
+
+                                    // check if new label is dominated; if dominated, break;
+                                    if (distTemp >= (*oldLabelIt)[n + 1] && costTemp >= (*oldLabelIt)[n + 2])
                                     {
-                                        dominatedTemp = true;
-                                        break;
+                                        if (PRINT_FOR_DEBUG)
+                                        {
+                                            cout << "new label: ";
+                                            printOneLabel(label, bigM);
+                                            cout << "old label: ";
+                                            printOneLabel(*oldLabelIt, bigM);
+                                        }
+
+                                        long result = (B2DinabTempLong | (long)(*oldLabelIt)[n + 3]);
+                                        if (result == B2DinabTempLong) // new label is dominated
+                                        {
+                                            dominatedTemp = true;
+                                            break;
+                                        }
+                                        else
+                                            ++oldLabelIt;
+                                    } // in case that old and new label are the same, then only remove the new label
+                                    else if (distTemp <= (*oldLabelIt)[n + 1] && costTemp <= (*oldLabelIt)[n + 2]) // old label is possible to be dominated
+                                    {
+                                        long result = ((long)B2Dtemp | (long)(*oldLabelIt)[n + 4]);
+                                        if (result == (*oldLabelIt)[n + 4])
+                                        {
+                                            // CHECK IF THE OLD LABEL IS ADDED IN THE CURRENT ITERATION WHEN CHECKING OTHER NODES' SUCCESSOR:
+                                            // when oldLabelVecIndex< updated oldLabelSize, and oldLabelVecIndex>= updated oldLabelSize - updated number of newly added labels
+                                            // then it means, the current old label is the one newly added. (newly added means added in the laster iteration) (oldLabelVecIndex starts from 0)
+                                            // IF YES, THEN CHANGE THE NUMBER OF LABELS ADDED IN THIS ITERATION
+                                            if (oldLabelVecIndex < oldLabelSize && oldLabelVecIndex >= (oldLabelSize - numNewlyAddedLabels[succ]))
+                                                numNewlyAddedLabels[succ] -= 1;
+
+                                            // CHECK IF THE OLD LABEL IS ADDED IN THE THE PREVIOUS  ITERATION WHEN CHECKING OTHER NODES' SUCCESSOR
+                                            if (oldLabelVecIndex < (oldLabelSize - numNewlyAddedLabels[succ]) && oldLabelVecIndex >= (oldLabelSize - numNewlyAddedLabels[succ] - numNewlyAddedInLastIteration[succ]))
+                                                numNewlyAddedInLastIteration[succ] -= 1;
+
+                                            oldLabelVecIndex--;
+
+                                            oldLabelIt = bigLambda_allNodesLableSet[succ].erase(oldLabelIt);
+
+                                            if (PRINT_FOR_DEBUG)
+                                                cout << "new label is dominated" << endl;
+                                        }
+                                        else
+                                            ++oldLabelIt;
                                     }
+                                    else
+                                        ++oldLabelIt;
+
+                                    oldLabelVecIndex++;
+                                }
                             }
+
                             if (!dominatedTemp)
                             {
                                 vector<double> labelTemp;
@@ -276,26 +322,18 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                                 labelTemp.push_back(B2Dtemp);
                                 labelTemp.push_back(B2Dinabtemp);
 
-                                //    vector<double> labelTemp;
-                                //     for (int j = 0; j < n + 4; j++)
-                                //         labelTemp.push_back(label[j]);
-                                //     int numVisitedNodes = label[n];
-                                //     labelTemp[succ] = numVisitedNodes + 1;
-                                //     labelTemp[n] = numVisitedNodes + 1; //!!! lable[n] is the number of visited nodes;
-                                //     labelTemp[n + 1] = distTemp;        //!!! label[n+1] is the consumed resouces;
-                                //     labelTemp[n + 2] = costTemp;        //!!! lable[n+2] is the cost
-                                //     labelTemp[n + 3] = B2Dtemp;
-
-                                F_nodeSuccLabelSet.push_back(labelTemp);
+                                // F_nodeSuccLabelSet.push_back(labelTemp);
+                                bigLambda_allNodesLableSet[succ].push_back(labelTemp);
+                                numNewlyAddedLabels[succ] += 1;
 
                                 if (PRINT_FOR_DEBUG)
                                 {
                                     cout << "visited number of nodes: labelTemp[n]=" << labelTemp[n] << endl;
                                     cout << "traveled distance: labelTemp[n + 1]=" << labelTemp[n + 1] << endl;
 
-                                    cout << "# of labels in F set: " << F_nodeSuccLabelSet.size() << endl;
-                                    cout << "-> F set" << endl;
-                                    printLabelSet(F_nodeSuccLabelSet, bigM);
+                                    // cout << "# of labels in F set: " << F_nodeSuccLabelSet.size() << endl;
+                                    // cout << "-> F set" << endl;
+                                    // printLabelSet(F_nodeSuccLabelSet, bigM);
                                 }
                             }
                         }
@@ -303,6 +341,20 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                         {
                             label[succ] = bigM;
                             label[n + 4] += twoPow[n - succ - 1];
+
+                            // tried running it but it runs very slow
+                            //  long newB2Dtemp = label[n + 4] + twoPow[n - succ - 1];
+                            //  if (newB2Dtemp == allOnes)
+                            //  {
+                            //      bigLambda_allNodesLableSet[node].erase(bigLambda_allNodesLableSet[i].begin() + nodeLabelSize - 1 - i - numNewlyAddedLabels[node]);
+                            //      numNewlyAddedInLastIteration[node] -= 1;
+                            //      i--;
+                            //  }
+                            //  else
+                            //  {
+                            //      label[succ] = bigM;
+                            //      label[n + 4] += newB2Dtemp;
+                            //  }
 
                             if (PRINT_FOR_DEBUG)
                                 cout
@@ -314,118 +366,41 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
 
                 //========> EFF function in LINE 15 and 16 in ESPPRC(p) PSEUDO-CODE <========
                 {
-                    //===> check if each label in F_nodeSuccLabelSet is dominated by bigLambda_allNodesLableSet[succ]
-                    // if each label is dominated, then no need to add to bigLambda_allNodesLableSet[succ], so no change, and hasChange = false;
-                    // if not, then the non-dominated label is added to bigLambda_allNodesLableSet[succ], so hasChange = true;
 
                     //===> check the labels of visiting nodes
                     // EFF() step (1): compare labels inside new-label-set
                     // EFF() step (2): remove dominated lables inside new-label-set
                     // EFF() step (3): compare labels of old and updated new-label-set without dominated ones
                     // EFF() step (4): remove dominated labels from old and updated new-label-set
-                    //===> step (1) (2) and (3) are combined as procedures below
-                    for (auto newLabelIt = F_nodeSuccLabelSet.begin(); newLabelIt != F_nodeSuccLabelSet.end();)
-                    {
-                        bool getNewAddress = false;
-                        int oldLabelVecIndex = 0;
-                        for (auto oldLabelIt = bigLambda_allNodesLableSet[succ].begin(); oldLabelIt != bigLambda_allNodesLableSet[succ].end();)
-                        {
-                            int oldLabelSize = bigLambda_allNodesLableSet[succ].size();
-
-                            if ((*newLabelIt)[n + 1] >= (*oldLabelIt)[n + 1] && (*newLabelIt)[n + 2] >= (*oldLabelIt)[n + 2])
-                            {
-                                if (PRINT_FOR_DEBUG)
-                                {
-                                    cout << "new label: ";
-                                    printOneLabel(*newLabelIt, bigM);
-                                    cout << "old label: ";
-                                    printOneLabel(*oldLabelIt, bigM);
-                                }
-
-                                long result = ((long)(*newLabelIt)[n + 4] | (long)(*oldLabelIt)[n + 3]);
-                                if (result == (long)(*newLabelIt)[n + 4])
-                                {
-                                    // dominatedNewLabelSet.push_back(*newLabelIt);
-                                    newLabelIt = F_nodeSuccLabelSet.erase(newLabelIt);
-                                    getNewAddress = true;
-                                    break;
-
-                                    if (PRINT_FOR_DEBUG)
-                                        cout << "new label is dominated" << endl;
-                                }
-                                else
-                                    ++oldLabelIt;
-                            } // in case that old and new labels are the same, then only add in dominatedNewLabelSet
-                            else if ((*newLabelIt)[n + 1] <= (*oldLabelIt)[n + 1] && (*newLabelIt)[n + 2] <= (*oldLabelIt)[n + 2]) // old label is possible to be dominated
-                            {
-                                long result = ((long)(*newLabelIt)[n + 3] | (long)(*oldLabelIt)[n + 4]);
-                                if (result == (long)(*oldLabelIt)[n + 4])
-                                {
-                                    // CHECK IF THE OLD LABEL IS ADDED IN THE CURRENT ITERATION WHEN CHECKING OTHER NODES' SUCCESSOR:
-                                    // when oldLabelVecIndex< updated oldLabelSize, and oldLabelVecIndex>= updated oldLabelSize - updated number of newly added labels
-                                    // then it means, the current old label is the one newly added. (newly added means added in the laster iteration) (oldLabelVecIndex starts from 0)
-                                    // IF YES, THEN CHANGE THE NUMBER OF LABELS ADDED IN THIS ITERATION
-                                    if (oldLabelVecIndex < oldLabelSize && oldLabelVecIndex >= (oldLabelSize - numNewlyAddedLabels[succ]))
-                                        numNewlyAddedLabels[succ] -= 1;
-
-                                    // CHECK IF THE OLD LABEL IS ADDED IN THE THE PREVIOUS  ITERATION WHEN CHECKING OTHER NODES' SUCCESSOR
-                                    if (oldLabelVecIndex < (oldLabelSize - numNewlyAddedLabels[succ]) && oldLabelVecIndex >= (oldLabelSize - numNewlyAddedLabels[succ] - numNewlyAddedInLastIteration[succ]))
-                                        numNewlyAddedInLastIteration[succ] -= 1;
-
-                                    oldLabelVecIndex--;
-
-                                    // dominatedExistingLabelSet.push_back(*oldLabelIt);
-                                    oldLabelIt = bigLambda_allNodesLableSet[succ].erase(oldLabelIt);
-
-                                    if (PRINT_FOR_DEBUG)
-                                        cout << "new label is dominated" << endl;
-                                }
-                                else
-                                    ++oldLabelIt;
-                            }
-                            else
-                                ++oldLabelIt;
-
-                            oldLabelVecIndex++;
-                        }
-                        if (!getNewAddress)
-                            ++newLabelIt;
-                    }
-
-                    //===> add the non-dominated labels to bigLambda_allNodesLableSet[succ]
-                    for (auto &labelTemp : F_nodeSuccLabelSet)
-                    {
-                        bigLambda_allNodesLableSet[succ].push_back(labelTemp);
-                        // newLabelSet[succ].push_back(labelTemp);
-                        numNewlyAddedLabels[succ] += 1;
-                    }
+                    //===> step (1) (2) and (3) are combined as procedures below}
 
                     if (PRINT_FOR_DEBUG)
                     {
                         cout << "# of labels at succ node: " << bigLambda_allNodesLableSet[succ].size() << endl;
                         cout << "-> labels after update succ=" << succ << " labels" << endl;
                         printLabelSet(bigLambda_allNodesLableSet[succ], bigM);
-
-                        // cout << "-> dominatedExistingLabelSet" << endl;
-                        // printLabelSet(dominatedExistingLabelSet, bigM);
-
-                        // cout << "-> dominatedNewLabelSet" << endl;
-                        // printLabelSet(dominatedNewLabelSet, bigM);
-
-                        cout << "-> F set before update" << endl;
-                        printLabelSet(F_nodeSuccLabelSet, bigM);
                     }
 
                     // //===> step (4)
                     // //===> remove the dominated labels for current and succsor nodes
-
-                    if (F_nodeSuccLabelSet.size() != 0) //===> LINE 16 in ESPPRC(p) PSEUDO-CODE//===> LINE 16 in ESPPRC(p) PSEUDO-CODE
-                    {
-                        E_toBeTreatedNodesSet.insert(succ); //===> LINE 17 in ESPPRC(p) PSEUDO-CODE
-                        if (PRINT_FOR_DEBUG)
-                            printf("succ=%d is added int set E\n", succ);
-                    }
                 }
+            }
+        }
+        for (int i = 0; i < n; i++)
+            if (numNewlyAddedLabels[i] > 0) //===> LINE 16 in ESPPRC(p) PSEUDO-CODE//===> LINE 16 in ESPPRC(p) PSEUDO-CODE
+            {
+                E_toBeTreatedNodesSet.insert(i); //===> LINE 17 in ESPPRC(p) PSEUDO-CODE
+                if (PRINT_FOR_DEBUG)
+                    printf("node=%d is added int set E\n", i);
+            }
+
+        for (int i = 0; i < n; i++)
+        {
+            if (i != startingNode && i != endingNode)
+            {
+                int numLabelsToRemove = bigLambda_allNodesLableSet[i].size() - numNewlyAddedLabels[i];
+                if (numLabelsToRemove > 0)
+                    bigLambda_allNodesLableSet[i].erase(bigLambda_allNodesLableSet[i].begin(), bigLambda_allNodesLableSet[i].begin() + numLabelsToRemove);
             }
         }
 
