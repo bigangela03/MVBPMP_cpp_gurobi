@@ -286,11 +286,14 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                                             // then it means, the current old label is the one newly added. (newly added means added in the laster iteration) (oldLabelVecIndex starts from 0)
                                             // IF YES, THEN CHANGE THE NUMBER OF LABELS ADDED IN THIS ITERATION
                                             if (oldLabelVecIndex < oldLabelSize && oldLabelVecIndex >= (oldLabelSize - numNewlyAddedLabels[succ]))
+                                            {
                                                 numNewlyAddedLabels[succ] -= 1;
+                                            }
+                                            else if (oldLabelVecIndex < (oldLabelSize - numNewlyAddedLabels[succ]) && oldLabelVecIndex >= (oldLabelSize - numNewlyAddedLabels[succ] - numNewlyAddedInLastIteration[succ]))
+                                            { // CHECK IF THE OLD LABEL IS ADDED IN THE THE PREVIOUS  ITERATION WHEN CHECKING OTHER NODES' SUCCESSOR
 
-                                            // CHECK IF THE OLD LABEL IS ADDED IN THE THE PREVIOUS  ITERATION WHEN CHECKING OTHER NODES' SUCCESSOR
-                                            if (oldLabelVecIndex < (oldLabelSize - numNewlyAddedLabels[succ]) && oldLabelVecIndex >= (oldLabelSize - numNewlyAddedLabels[succ] - numNewlyAddedInLastIteration[succ]))
                                                 numNewlyAddedInLastIteration[succ] -= 1;
+                                            }
 
                                             oldLabelVecIndex--;
 
