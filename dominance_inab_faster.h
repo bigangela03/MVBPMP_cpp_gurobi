@@ -294,7 +294,7 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                                                 numNewlyAddedLabels[succ] -= 1;
 
                                             // CHECK IF THE OLD LABEL IS ADDED IN THE THE PREVIOUS  ITERATION WHEN CHECKING OTHER NODES' SUCCESSOR
-                                            if (oldLabelVecIndex < (oldLabelSize - numNewlyAddedLabels[succ]) && oldLabelVecIndex >= (oldLabelSize - numNewlyAddedLabels[succ] - numNewlyAddedInLastIteration[succ]))
+                                            else if (oldLabelVecIndex < (oldLabelSize - numNewlyAddedLabels[succ]) && oldLabelVecIndex >= (oldLabelSize - numNewlyAddedLabels[succ] - numNewlyAddedInLastIteration[succ]))
                                                 numNewlyAddedInLastIteration[succ] -= 1;
 
                                             oldLabelVecIndex--;

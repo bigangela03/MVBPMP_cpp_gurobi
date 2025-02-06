@@ -26,7 +26,12 @@
 // #include "ga_objfunc_greedy.h"
 #include "ga.h"
 // #include "dominance.h"
-#include "dominance_inab.h"
+// #include "dominance_inab.h"
+// #include "dominance_inab_faster.h"
+#include "dominance_inab_faster2.h"
+
+// #include "dominance_inab_shortlabel.h"
+
 // #include "dominance_inab_v0.h"
 // #include "dominance_inab_v1.h"
 
@@ -58,6 +63,7 @@ bool USE_DOMINACE_METHOD_OR_SUB_PROBLEM = true; // if it is false, Gurobi will b
 
 bool testOneRouteObjAndDist = false;
 bool toRemove_addInitialSolutionInPricingProblem = false;
+bool addNodeInaccNeighbors = true;
 
 // double bigM = 10000000;
 double epsilon = numeric_limits<double>::epsilon();
@@ -133,6 +139,7 @@ int main(int argc, char *argv[])
 	double cost = route.travelCost;
 	double vw = route.vehicleWeight;
 	double capacity = route.totalCapacity;
+	double disLimit = (double)route.DIS;
 
 	//==============reading vehicle info==============
 	string vehicleFileName = argv[3];
@@ -182,7 +189,98 @@ int main(int argc, char *argv[])
 		}
 		TIV = findTriangelInequalityViolation(dis_v, n);
 		printf("===> after modifying distance,TIV.size=%d\n", TIV.size());
+		if (TIV.size() > 0)
+		{
+			cout << "ERROR: there are some triangle inequality violations in distance data!" << endl;
+			exit(1);
+		}
 	}
+
+	//===> check if visiting some arcs over distance limit
+	int startingNode = 0;
+	int endingNode = n - 1;
+	vector<vector<double>> inaccessibleArcs;
+	vector<vector<int>> nodeNeighbors; // it is not used right now since it makes dominance run slower
+	vector<vector<int>> nodeInaccNeighbors;
+
+	// // for a node i, when sum_(j in N) x(i,j)=0, then y(i,j)=0 for any j, and z(i,j,k), z(j,i,k), and z(j,k,i)=0 in optimal solution
+	// // in column generation, we keep adding the newly found route to the RHS of the master problem,
+	// // so after each iteration of CG, remove the newly added visited nodes from unvisitedNodes set;
+	// this idea is wrong for finding upper bound. It forces y z be zero according to the result from all previous iteration results, but it might be no zero in next iterations.
+	// the idea of setting up var=0 is to make sure that it is definitely zero in the final solution, so in brand and bound tree, it is always zero.
+	// so that it is equilalents to adding some branching at root node of branch and bound tree using column generation
+	// unordered_set<int> unvisitedNodes;
+
+	// initialize nodeNeighbors and nodeInaccNeighbors
+	for (int i = 0; i < n; i++)
+	{
+		vector<int> neighbors;
+		if (i != endingNode)
+			for (int j = 0; j < n; j++)
+			{
+				if (j != startingNode)
+					neighbors.push_back(j);
+			}
+		nodeNeighbors.push_back(neighbors);
+
+		vector<int> neighbors2;
+		nodeInaccNeighbors.push_back(neighbors2);
+
+		// if (i != 0 && i != (n - 1))
+		// 	unvisitedNodes.insert(i);
+	}
+	// find the arcs violate distance limit
+	for (int i = 0; i < n; i++)
+		for (int j = 0; j < n; j++)
+		{
+			if (i != startingNode && i != endingNode && j != endingNode && j != startingNode && i != j)
+			{
+				double distTemp = dis_v[startingNode][i] + dis_v[i][j] + dis_v[j][endingNode];
+				if (distTemp > disLimit)
+				{
+					vector<double> arcTemp = {(double)i, (double)j, distTemp};
+					inaccessibleArcs.push_back(arcTemp);
+
+					// update nodeInaccNeighbors
+					nodeInaccNeighbors[i].push_back(j);
+
+					// update nodeNeighbors
+					auto it = find(nodeNeighbors[i].begin(), nodeNeighbors[i].end(), j);
+
+					if (it != nodeNeighbors[i].end())
+					{
+						nodeNeighbors[i].erase(it);
+					}
+				}
+			}
+		}
+
+	cout << "# of inaccessibleArcs = " << inaccessibleArcs.size() << endl;
+
+	// for (auto nodePairs : inaccessibleArcs)
+	// {
+	// 	for (auto node : nodePairs)
+	// 		cout << node << " ";
+	// 	cout << endl;
+	// }
+
+	// cout << "===> nodeInaccNeighbors:" << endl;
+	// for (int i = 0; i < n; i++)
+	// {
+	// 	cout << "node " << i << endl;
+	// 	for (auto &neighbor : nodeInaccNeighbors[i])
+	// 		cout << neighbor << " ";
+	// 	cout << endl;
+	// }
+
+	// cout << "===> nodeNeighbors:" << endl;
+	// for (int i = 0; i < n; i++)
+	// {
+	// 	cout << "node " << i << endl;
+	// 	for (auto &neighbor : nodeNeighbors[i])
+	// 		cout << neighbor << " ";
+	// 	cout << endl;
+	// }
 
 	GRBEnv *env = 0;
 
@@ -210,7 +308,7 @@ int main(int argc, char *argv[])
 		cout << "before using ga" << endl;
 		if (USE_GA_FOR_INIT_SOL)
 		{
-			double disLimit = (double)route.DIS;
+			// double disLimit = (double)route.DIS;
 
 			// right now it only returns the selected route, no customers and profit info
 			vector<int> finalRoute = runga(n, price, cost, capacity, disLimit, vw, wt, dis_v);
@@ -221,7 +319,10 @@ int main(int argc, char *argv[])
 			cout << endl;
 
 			for (i = 0; i < finalRoute.size() - 1; i++)
+			{
 				newCol[finalRoute[i]][finalRoute[i + 1]] = 1;
+				// unvisitedNodes.erase(finalRoute[i]);
+			}
 		}
 		else
 		{
@@ -293,6 +394,21 @@ int main(int argc, char *argv[])
 				z[i][j][n - 1].set(GRB_DoubleAttr_UB, 0);
 				z[i][0][j].set(GRB_DoubleAttr_UB, 0);
 				z[n - 1][i][j].set(GRB_DoubleAttr_UB, 0);
+			}
+
+			if (addNodeInaccNeighbors)
+			{
+				for (j = 0; j < nodeInaccNeighbors[i].size(); j++)
+				{
+					vector<int> nbsTemp = nodeInaccNeighbors[i];
+					y[i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+					for (k = 0; k < n; k++)
+					{
+						z[i][nbsTemp[j]][k].set(GRB_DoubleAttr_UB, 0);
+						z[i][k][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+						z[k][i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+					}
+				}
 			}
 		}
 
@@ -417,17 +533,6 @@ int main(int argc, char *argv[])
 					exit(1);
 				if (itrNum == 13)
 				{
-					// printf("pi(0,3)=%lf\n", pi[0][3]);
-					// printf("pi(3,17)=%lf\n", pi[3][17]);
-					// printf("pi(17,7)=%lf\n", pi[17][4]);
-					// printf("pi(7,8)=%lf\n", pi[4][14]);
-					// printf("pi(13,19)=%lf\n", pi[14][19]);
-					// printf("d(0,3)=%lf\n", dis_v[0][3]);
-					// printf("d(3,17)=%lf\n", dis_v[3][17]);
-					// printf("d(17,7)=%lf\n", dis_v[17][7]);
-					// printf("d(8,13)=%lf\n", dis_v[8][13]);
-					// printf("d(13,19)=%lf\n", dis_v[13][19]);
-
 					printf("xCoeff(0,1)=%lf\n", xCoeff[0][1]);
 					printf("xCoeff(1,4)=%lf\n", xCoeff[1][4]);
 					printf("xCoeffv(4,9)=%lf\n", xCoeff[4][9]);
@@ -457,17 +562,6 @@ int main(int argc, char *argv[])
 						printf("%lf,", xCoeff[n - 1][j]);
 					printf("%lf}};\n", xCoeff[n - 1][n - 1]);
 					//===> end of printing coeff
-
-					// double disGurobi = dis_v[0][17] + dis_v[17][15] + dis_v[15][11] + dis_v[11][9] + dis_v[9][5] + dis_v[5][13] + dis_v[13][19];
-					// double objGurobi = -xCoeff[0][17] - xCoeff[17][15] - xCoeff[15][11] - xCoeff[11][9] - xCoeff[9][5] - xCoeff[5][13] - xCoeff[13][19] - pi_lambda_sum;
-
-					// double disDominance = dis_v[0][1] + dis_v[1][4] + dis_v[4][9];
-					// double objDominance = -xCoeff[0][1] - xCoeff[1][4] - xCoeff[4][9] - pi_lambda_sum;
-
-					// cout << "objGurobi=" << objGurobi << endl;
-					// cout << "disGurobi=" << disGurobi << endl;
-					// cout << "obj=" << objDominance << endl;
-					// cout << "dis=" << disDominance << endl;
 				}
 			}
 
@@ -477,53 +571,19 @@ int main(int argc, char *argv[])
 
 			if (USE_DOMINACE_METHOD_OR_SUB_PROBLEM)
 			{
-
-				//===> the objective is to minimize value, so we get negative of the function used for Gurobi
-				// // double **xCoeff = new double *[n];
-
-				// vector<vector<double>> xCoeff(n, std::vector<double>(n));
-
-				// for (i = 0; i < n - 1; i++)
-				// 	for (j = 1; j < n; j++)
-				// 	{
-				// 		xCoeff[i][j] = 0;
-				// 		xCoeff[i][j] += cost * vw * dis_v[i][j];
-				// 		xCoeff[i][j] -= capacity * pi[i][j];
-				// 	}
-				// // assigen big value to unaccesiable arc in case it is used in runDominance()
-				// for (j = 0; j < n; j++)
-				// 	xCoeff[n - 1][j] = 1000000;
-				// for (i = 0; i < n; i++)
-				// 	xCoeff[i][0] = 1000000;
-
 				//===> !!!!!! selectedRoute index starts from 0 !!!!!!
 				//===> for example, selectedRoute[0]=0, selectedRoute[1]=6, selectedRoute[2]=9
 				//===> it means the route is 1->7->10
 				// return the cost of the selected Route !!!
-				double disLimit = (double)route.DIS;
-				// double objValue_PP;
-				// vector<int> selectedRoute = runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP);
 				vector<int> selectedRoute;
-				runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute);
+
+				// runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute, startingNode, endingNode, nodeNeighbors);
+				runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute, startingNode, endingNode);
 
 				objValue_PP += pi_lambda_sum;
 				objValue_PP = -objValue_PP;
 				printf("objective of Pricing problem (dominace): %lf\n", objValue_PP);
 
-				// if (objValue_PP < 0.000001 && objValue_PP > -0.000001)
-				// {
-				// 	cout << "Optimum Found!" << endl;
-
-				// 	convergePoint = objValue_master;
-				// 	PPobj = objValue_PP;
-
-				// 	printf("selected reoute: \n");
-				// 	for (i = 0; i < selectedRoute.size() - 1; i++)
-				// 		printf("%d->%d ", selectedRoute[i], selectedRoute[i + 1]);
-				// 	printf("\n");
-
-				// 	break;
-				// }
 				if (selectedRoute.size() > 1)
 				{
 					findSolutionInThisIteration = true;
@@ -583,6 +643,17 @@ int main(int argc, char *argv[])
 					x[i][i].set(GRB_DoubleAttr_UB, 0);
 					x[i][0].set(GRB_DoubleAttr_UB, 0);
 					x[n - 1][i].set(GRB_DoubleAttr_UB, 0);
+				}
+				if (addNodeInaccNeighbors)
+				{
+					for (i = 0; i < n; i++)
+					{
+						vector<int> nbsTemp = nodeInaccNeighbors[i];
+						for (j = 0; j < nbsTemp.size(); j++)
+						{
+							x[i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+						}
+					}
 				}
 
 				if (PRINT_FOR_DEBUG)
@@ -726,8 +797,10 @@ int main(int argc, char *argv[])
 				for (i = 0; i < n; i++)
 					for (j = 0; j < n; j++)
 						if (sol[i][j] > 0.999 && sol[i][j] < 1.001)
+						{
 							col.addTerm(-capacity, arcFlowCapacity[i][j]);
-
+							// unvisitedNodes.erase(i);
+						}
 				// if (PRINT_FOR_DEBUG)
 				{
 					printf("selected reoute: \n");
@@ -751,9 +824,24 @@ int main(int argc, char *argv[])
 				cout << "newLambdaCoeff=" << newLambdaCoeff << endl;
 
 				lambda.push_back(
-					Master.addVar(0.0, GRB_INFINITY, newLambdaCoeff,
-								  GRB_CONTINUOUS, col,
+					Master.addVar(0.0, GRB_INFINITY, newLambdaCoeff, GRB_CONTINUOUS, col,
 								  "lambda_" + itos(itrNum)));
+
+				// // --------if a node is not visited, then corresponding y and z are zeros----------
+				// for (auto &i : unvisitedNodes)
+				// {
+				// 	for (j = 0; j < n; j++)
+				// 	{
+				// 		y[i][j].set(GRB_DoubleAttr_UB, 0);
+				// 		y[j][i].set(GRB_DoubleAttr_UB, 0);
+				// 		for (k = 0; k < n; k++)
+				// 		{
+				// 			z[i][j][k].set(GRB_DoubleAttr_UB, 0);
+				// 			z[j][k][i].set(GRB_DoubleAttr_UB, 0);
+				// 			z[j][i][k].set(GRB_DoubleAttr_UB, 0);
+				// 		}
+				// 	}
+				// }
 			}
 			else
 			{
