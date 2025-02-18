@@ -147,7 +147,7 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
     long *twoPow = new long[n];
 
     for (int i = 0; i < n; i++)
-        twoPow[i] = 1 << i;
+        twoPow[i] = pow(2, i);
 
     if (PRINT_FOR_DEBUG)
         cout << "===> start dominace()" << endl;

@@ -37,4 +37,91 @@ So try using two different B2D, one includes bigM, one doesn't
  if we want to decide if new label is dominated by old label, after checking distance and cost,
 compare new label with bigM (558) and old label w/o bigM (514)
 
+The above idea worked well and implemented in dominance method.
+=============================================================================
 
+dw-cg_10_3_sparse_data_20pct_of_original_dominance.out:ERROR: node 7 has no delivery request.
+no redundant node in dense and sparse_data_60pct
+
+=============================================================================
+
+
+Another problem
+
+for 30_9 instance, there is slight difference between Gurobi and Dominance method. 
+Gurobi: convergePoint=1.99998
+Dominance: convergePoint=1.99996
+
+It is noticed that in the middle of running, around iteration 98, GRB and Dominance started to have different route 
+but the same pricing obj. Then they are back to the same page and then repeat such process. At then end, in iteration 98, 
+Gurobi: 
+Master obj: 1.99992
+Pricing obj:0.0002
+route: 0-16-8-28-26-2-29
+Dominance:
+Master obj: 1.99992
+Pricing obj: 0.0002
+route: 0-13-16-21-11-28-26-29
+
+Then in iteration 99, Gurboi gives different obj for master problem.
+Gurobi:
+Master: 1.99996
+PP: 0.0002
+Dominance
+Master: 1.99992
+PP: 0.0002
+
+I have no idea why master has differnt obj. Based on iteration 98, dominance found the same obj with Gurobi,
+so Dominance method returns correct solution. Confused right now.
+
+=============================================================================
+
+t40_10_data.txt, dense graph, gurobi is in endless loop like below.
+Gurobi
+   334 ======== DW-CG Iteration 54 ========
+   335 objective of Master problem: 1.99997
+   336 objective of PP problem (gurobi): 0.0001204
+   337 selected reoute:
+   338 0->6 6->34 34->39
+   339 newLambdaCoeff=-2     
+   340 ======== DW-CG Iteration 55 ========
+   341 objective of Master problem: 1.99997
+   342 objective of PP problem (gurobi): 5.51998e-05
+   343 selected reoute:
+   344 0->19 15->23 16->39 19->15 23->25 25->16
+   345 newLambdaCoeff=-1.99995
+   346 ======== DW-CG Iteration 56 ========
+   347 objective of Master problem: 1.99997
+   348 objective of PP problem (gurobi): 1.1638e-06
+   349 selected reoute:
+   350 0->27 23->39 25->38 27->33 33->25 38->23
+   351 newLambdaCoeff=-1.99953
+   352 ======== DW-CG Iteration 57 ========
+   353 objective of Master problem: 1.99997
+   354 objective of PP problem (gurobi): 5.1e-05
+   355 selected reoute:
+   356 0->30 20->39 29->20 30->33 33->29
+   357 newLambdaCoeff=-2
+   358 ======== DW-CG Iteration 58 ========
+   359 objective of Master problem: 1.99998
+   360 objective of PP problem (gurobi): 5.09999e-05
+   361 selected reoute:
+   362 0->6 6->34 34->39
+   363 newLambdaCoeff=-2
+
+   then repeat the result in iteration 58 forever
+
+Dominance
+334 ======== DW-CG Iteration 54 ========
+335 objective of Master problem: 1.99997
+336 objective of Pricing problem (dominace): 0.000069
+337 selected reoute:
+338 0->19 15->23 16->39 19->15 23->25 25->16
+339 newLambdaCoeff=-1.99995
+340 ======== DW-CG Iteration 55 ========
+341 objective of Master problem: 1.99997
+342 objective of Pricing problem (dominace): 0.000000
+343 selected reoute:
+344 0->33 10->38 20->10 25->39 30->20 33->30 38->25
+345 newLambdaCoeff=-1.99997
+346 Optimum Found!

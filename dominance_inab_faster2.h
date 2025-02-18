@@ -1,6 +1,13 @@
 #ifndef DOMINANCE_INAB_FASTER2_H
 #define DOMINANCE_INAB_FASTER2_H
 
+// useing bit operation to calculate 2^i has a problem like below
+//  i=30: 1073741824
+//  i=31: -2147483648
+//  i=32: 1
+//  i=33: 2
+// when i>=31, it starts to repeat i=0, 1...., so we need to use pow() function
+
 //// tried removing the labels when B2Dinab (B2D considers the inaccessible nodes) is all ones, it but it runs very slow, so it's dropped.
 // this version only stores the newly added labels in this and lastiteration at nodes exepct starting and ending nodes.
 // this version is based on dominance_inab.h. It dropped F set which includes all the newly added labels at the successor, and do the comparison while generating the new label.
@@ -89,9 +96,22 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
     long *twoPow = new long[n];
     long allOnes = 0;
 
+    // useing bit operation to calculate 2^i has a problem like below
+    //  i=30: 1073741824
+    //  i=31: -2147483648
+    //  i=32: 1
+    //  i=33: 2
+    // when i>=31, it starts to repeat i=0, 1...., so we need to use pow() function
+
+    //  for (int i = 0; i < n; i++)
+    //  {
+    //      twoPow[i] = 1 << i;
+    //      allOnes += twoPow[i];
+    //  }
+
     for (int i = 0; i < n; i++)
     {
-        twoPow[i] = 1 << i;
+        twoPow[i] = pow(2, i);
         allOnes += twoPow[i];
     }
 

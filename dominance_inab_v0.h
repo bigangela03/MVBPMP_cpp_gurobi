@@ -81,7 +81,7 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
 
     for (int i = 0; i < n; i++)
     {
-        twoPow[i] = 1 << i;
+        twoPow[i] = pow(2, i);
         allOnes += twoPow[i];
     }
 

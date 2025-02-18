@@ -59,11 +59,10 @@ bool PRINT_FOR_DEBUG = false;
 
 bool USE_GA_FOR_INIT_SOL = false; // the experiment shows that a good initial solution doesn't reduce the number of iterations of sub-problem
 bool FORCE_TRIANGLE_INEQUALITY = true;
-bool USE_DOMINACE_METHOD_OR_SUB_PROBLEM = true; // if it is false, Gurobi will be used for pricing problem
+// bool USE_DOMINACE_METHOD_FOR_SUB_PROBLEM = false; // if it is false, Gurobi will be used for pricing problem
 
 bool testOneRouteObjAndDist = false;
 bool toRemove_addInitialSolutionInPricingProblem = false;
-bool addNodeInaccNeighbors = true;
 
 // double bigM = 10000000;
 double epsilon = numeric_limits<double>::epsilon();
@@ -83,22 +82,36 @@ set<vector<int>> findTriangelInequalityViolation(double **, int);
 int main(int argc, char *argv[])
 {
 
+	string pricingMethod;
+	bool ADD_PREPROCESS_1 = true;
+	bool ADD_PREPROCESS_2 = true;
+	bool addNodeInaccNeighbors = true;
+
+	if (addNodeInaccNeighbors)
+		ADD_PREPROCESS_1 = true;
+
 	//********* only read graph info and vehicle info by arguments
 	//********* doesn't go through the graph info in the data folder
-	if (argc != 4)
+	if (argc != 5)
 	{
 		cout
-			<< "Usage: ./bpmp_dw-cg.x nodesDataNameAndPath numberOfVehicles vehicleDataNameAndPath"
+			<< "Usage: ./bpmp_dw-cg.x nodesDataNameAndPath numberOfVehicles vehicleDataNameAndPath pricingMethod(dominance or gurobi)"
 			<< endl;
 		return 1;
 	}
 
-	if (argc == 4)
+	if (argc == 5)
 	{
 		cout << "Nodes Data: " << argv[1] << endl;
 		cout << "Number of Vehicles: " << argv[2] << endl;
 		cout << "Vehicles Data: " << argv[3] << endl;
 		numV = stoi(argv[2]);
+		pricingMethod = argv[4];
+		if (pricingMethod != "dominance" && pricingMethod != "gurobi")
+		{
+			cout << "ERROR: pricingMethod should be one of them: dominance, gurobi" << endl;
+			exit(1);
+		}
 	}
 
 	clock_t beginTime = clock();
@@ -141,32 +154,60 @@ int main(int argc, char *argv[])
 	double capacity = route.totalCapacity;
 	double disLimit = (double)route.DIS;
 
-	//==============reading vehicle info==============
-	string vehicleFileName = argv[3];
+	// //==============reading vehicle info==============
+	// string vehicleFileName = argv[3];
 
-	printf("reading vehicle file: %s ...\n", vehicleFileName.c_str());
-	// exit (1);
-	route.readSingleVehicleFile(vehicleFileName, numV);
+	// printf("reading vehicle file: %s ...\n", vehicleFileName.c_str());
+	// // exit (1);
+	// route.readSingleVehicleFile(vehicleFileName, numV);
 
-	// vehicle and origin always starts from 0
-	int vehicle[numV];
-	int origin[numV];
+	// // vehicle and origin always starts from 0
+	// int vehicle[numV];
+	// int origin[numV];
 
-	printf("vehicles (start from 0):\n");
-	for (int i = 0; i < numV; i++)
-	{
-		vehicle[i] = route.vehicle[i];
-		printf("%d ", vehicle[i]);
-	}
-	printf("\norigins (start from 0):\n");
-	for (int i = 0; i < numV; i++)
-	{
-		origin[i] = route.origin[i];
-		printf("%d ", origin[i]);
-	}
-	printf("\n");
+	// printf("vehicles (start from 0):\n");
+	// for (int i = 0; i < numV; i++)
+	// {
+	// 	vehicle[i] = route.vehicle[i];
+	// 	printf("%d ", vehicle[i]);
+	// }
+	// printf("\norigins (start from 0):\n");
+	// for (int i = 0; i < numV; i++)
+	// {
+	// 	origin[i] = route.origin[i];
+	// 	printf("%d ", origin[i]);
+	// }
+	// printf("\n");
 
 	//================> end of reading data <================
+
+	int startingNode = 0;
+	int endingNode = n - 1;
+
+	// check if there is demand associated with each node
+	bool findNonUsedNode = false;
+	for (int i = 0; i < n; i++)
+	{
+		double nodeDemand = 0;
+		if (i != startingNode && i != endingNode)
+		{
+			for (int j = 0; j < n; j++)
+			{
+				if (j != startingNode)
+					nodeDemand += wt[i][j];
+				if (j != endingNode)
+					nodeDemand += wt[j][i];
+			}
+
+			if (nodeDemand < 10 * epsilon)
+			{
+				cout << "ERROR: node " << i << " has no delivery request." << endl;
+				findNonUsedNode = true;
+			}
+		}
+	}
+	// if (findNonUsedNode)
+	// 	exit(1);
 
 	if (FORCE_TRIANGLE_INEQUALITY)
 	{
@@ -196,13 +237,6 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	//===> check if visiting some arcs over distance limit
-	int startingNode = 0;
-	int endingNode = n - 1;
-	vector<vector<double>> inaccessibleArcs;
-	vector<vector<int>> nodeNeighbors; // it is not used right now since it makes dominance run slower
-	vector<vector<int>> nodeInaccNeighbors;
-
 	// // for a node i, when sum_(j in N) x(i,j)=0, then y(i,j)=0 for any j, and z(i,j,k), z(j,i,k), and z(j,k,i)=0 in optimal solution
 	// // in column generation, we keep adding the newly found route to the RHS of the master problem,
 	// // so after each iteration of CG, remove the newly added visited nodes from unvisitedNodes set;
@@ -211,76 +245,83 @@ int main(int argc, char *argv[])
 	// so that it is equilalents to adding some branching at root node of branch and bound tree using column generation
 	// unordered_set<int> unvisitedNodes;
 
-	// initialize nodeNeighbors and nodeInaccNeighbors
-	for (int i = 0; i < n; i++)
+	//===> check if visiting some arcs over distance limit
+	vector<vector<double>> inaccessibleArcs;
+	vector<vector<int>> nodeNeighbors; // it is not used right now since it makes dominance run slower
+	vector<vector<int>> nodeInaccNeighbors;
+	if (ADD_PREPROCESS_1)
 	{
-		vector<int> neighbors;
-		if (i != endingNode)
+		// initialize nodeNeighbors and nodeInaccNeighbors
+		for (int i = 0; i < n; i++)
+		{
+			vector<int> neighbors;
+			if (i != endingNode)
+				for (int j = 0; j < n; j++)
+				{
+					if (j != startingNode)
+						neighbors.push_back(j);
+				}
+			nodeNeighbors.push_back(neighbors);
+
+			vector<int> neighbors2;
+			nodeInaccNeighbors.push_back(neighbors2);
+
+			// if (i != 0 && i != (n - 1))
+			// 	unvisitedNodes.insert(i);
+		}
+
+		// find the arcs violate distance limit
+		for (int i = 0; i < n; i++)
 			for (int j = 0; j < n; j++)
 			{
-				if (j != startingNode)
-					neighbors.push_back(j);
-			}
-		nodeNeighbors.push_back(neighbors);
-
-		vector<int> neighbors2;
-		nodeInaccNeighbors.push_back(neighbors2);
-
-		// if (i != 0 && i != (n - 1))
-		// 	unvisitedNodes.insert(i);
-	}
-	// find the arcs violate distance limit
-	for (int i = 0; i < n; i++)
-		for (int j = 0; j < n; j++)
-		{
-			if (i != startingNode && i != endingNode && j != endingNode && j != startingNode && i != j)
-			{
-				double distTemp = dis_v[startingNode][i] + dis_v[i][j] + dis_v[j][endingNode];
-				if (distTemp > disLimit)
+				if (i != startingNode && i != endingNode && j != endingNode && j != startingNode && i != j)
 				{
-					vector<double> arcTemp = {(double)i, (double)j, distTemp};
-					inaccessibleArcs.push_back(arcTemp);
-
-					// update nodeInaccNeighbors
-					nodeInaccNeighbors[i].push_back(j);
-
-					// update nodeNeighbors
-					auto it = find(nodeNeighbors[i].begin(), nodeNeighbors[i].end(), j);
-
-					if (it != nodeNeighbors[i].end())
+					double distTemp = dis_v[startingNode][i] + dis_v[i][j] + dis_v[j][endingNode];
+					if (distTemp > disLimit)
 					{
-						nodeNeighbors[i].erase(it);
+						vector<double> arcTemp = {(double)i, (double)j, distTemp};
+						inaccessibleArcs.push_back(arcTemp);
+
+						// update nodeInaccNeighbors
+						nodeInaccNeighbors[i].push_back(j);
+
+						// update nodeNeighbors
+						auto it = find(nodeNeighbors[i].begin(), nodeNeighbors[i].end(), j);
+
+						if (it != nodeNeighbors[i].end())
+						{
+							nodeNeighbors[i].erase(it);
+						}
 					}
 				}
 			}
-		}
+		cout << "# of inaccessibleArcs = " << inaccessibleArcs.size() << endl;
 
-	cout << "# of inaccessibleArcs = " << inaccessibleArcs.size() << endl;
+		// for (auto nodePairs : inaccessibleArcs)
+		// {
+		// 	for (auto node : nodePairs)
+		// 		cout << node << " ";
+		// 	cout << endl;
+		// }
 
-	// for (auto nodePairs : inaccessibleArcs)
-	// {
-	// 	for (auto node : nodePairs)
-	// 		cout << node << " ";
-	// 	cout << endl;
-	// }
+		// cout << "===> nodeInaccNeighbors:" << endl;
+		// for (int i = 0; i < n; i++)
+		// {
+		// 	cout << "node " << i << endl;
+		// 	for (auto &neighbor : nodeInaccNeighbors[i])
+		// 		cout << neighbor << " ";
+		// 	cout << endl;
+		// }
 
-	// cout << "===> nodeInaccNeighbors:" << endl;
-	// for (int i = 0; i < n; i++)
-	// {
-	// 	cout << "node " << i << endl;
-	// 	for (auto &neighbor : nodeInaccNeighbors[i])
-	// 		cout << neighbor << " ";
-	// 	cout << endl;
-	// }
-
-	// cout << "===> nodeNeighbors:" << endl;
-	// for (int i = 0; i < n; i++)
-	// {
-	// 	cout << "node " << i << endl;
-	// 	for (auto &neighbor : nodeNeighbors[i])
-	// 		cout << neighbor << " ";
-	// 	cout << endl;
-	// }
+		// cout << "===> nodeNeighbors:" << endl;
+		// for (int i = 0; i < n; i++)
+		// {
+		// 	cout << "node " << i << endl;
+		// 	for (auto &neighbor : nodeNeighbors[i])
+		// 		cout << neighbor << " ";
+		// 	cout << endl;
+		// }
+	}
 
 	GRBEnv *env = 0;
 
@@ -342,7 +383,13 @@ int main(int argc, char *argv[])
 		}
 
 		env = new GRBEnv();
+
 		GRBModel Master = GRBModel(*env);
+
+		// Turn off presolve
+		Master.set(GRB_IntParam_Presolve, 0);
+		// Silent Mode
+		Master.getEnv().set(GRB_IntParam_OutputFlag, 0);
 
 		//****** Variables of master problem
 		//*** set up var lambda
@@ -409,6 +456,22 @@ int main(int argc, char *argv[])
 						z[k][i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
 					}
 				}
+			}
+
+			if (ADD_PREPROCESS_2)
+			{
+				int numViolatedTriples = 0;
+				for (int i = 0; i < n; i++)
+					if (i != startingNode && i != endingNode)
+						for (auto &k : nodeNeighbors[i])
+							for (auto &j : nodeNeighbors[k])
+								if (i != j)
+									if (dis_v[startingNode][i] + dis_v[i][k] + dis_v[k][j] + dis_v[j][endingNode] > disLimit)
+									{
+										z[i][j][k].set(GRB_DoubleAttr_UB, 0);
+										numViolatedTriples++;
+									}
+				cout << "numViolatedTriples=" << numViolatedTriples;
 			}
 		}
 
@@ -480,7 +543,7 @@ int main(int argc, char *argv[])
 			findSolutionInThisIteration = false;
 
 			Master.write("dw-cg-master.lp");
-			Master.getEnv().set(GRB_IntParam_OutputFlag, 0); // Silent Mode
+
 			Master.optimize();
 
 			if (PRINT_FOR_DEBUG)
@@ -569,7 +632,8 @@ int main(int argc, char *argv[])
 			// double **sol = new double *[n];
 			double objValue_PP;
 
-			if (USE_DOMINACE_METHOD_OR_SUB_PROBLEM)
+			// if (USE_DOMINACE_METHOD_FOR_SUB_PROBLEM)
+			if (pricingMethod == "dominance")
 			{
 				//===> !!!!!! selectedRoute index starts from 0 !!!!!!
 				//===> for example, selectedRoute[0]=0, selectedRoute[1]=6, selectedRoute[2]=9
@@ -611,7 +675,8 @@ int main(int argc, char *argv[])
 					exit(1);
 				}
 			}
-			else
+			// else
+			else if (pricingMethod == "gurobi")
 			{
 
 				//===> when not using dominace method, use Gurobi to solve the MIP
@@ -751,7 +816,9 @@ int main(int argc, char *argv[])
 					cout << "PP objective function is set up! \n";
 
 				PPmodel.getEnv().set(GRB_IntParam_OutputFlag, 0); // Silent Mode
-				PPmodel.set(GRB_DoubleParam_OptimalityTol, 1e-9); // Optimality tolerance
+				PPmodel.set(GRB_DoubleParam_OptimalityTol, 1e-9); // Optimality tolerance (constraints)
+				PPmodel.set(GRB_DoubleParam_MIPGap, 0);			  // set up mip gap for obj
+				PPmodel.set(GRB_IntParam_Presolve, 0);			  // Turn off presolve
 
 				PPmodel.write("DW_pricingModel.lp");
 				PPmodel.optimize();
@@ -882,33 +949,40 @@ int main(int argc, char *argv[])
 			cout << "DW-CG itrNum=" << itrNum << endl;
 		}
 
-		for (i = 0; i < n; i++)
-			for (j = 0; j < n; j++)
-				y[i][j].set(GRB_CharAttr_VType, GRB_BINARY);
+		reportTime(beginTime, beginWallClock);
 
-		// Fix variable other lambda var to be 0 except the last added lambda
-		// lambda[0] represents route from 0 to (n-1)
-		for (i = 0; i < itrNum - 1; i++)
-			lambda[i].set(GRB_DoubleAttr_UB, 0);
+		// use the last added route to solve BPMP to get lower bound
 
-		Master.optimize();
+		if (false)
+		{
+			for (i = 0; i < n; i++)
+				for (j = 0; j < n; j++)
+					y[i][j].set(GRB_CharAttr_VType, GRB_BINARY);
 
-		double objValue = Master.get(GRB_DoubleAttr_ObjVal);
-		cout << "objective with binary y and the last added route: " << objValue
-			 << "\n";
+			// Fix variable other lambda var to be 0 except the last added lambda
+			// lambda[0] represents route from 0 to (n-1)
+			for (i = 0; i < itrNum - 1; i++)
+				lambda[i].set(GRB_DoubleAttr_UB, 0);
 
-		/*
-		 if (Master.get (GRB_IntAttr_SolCount) > 0)
-		 {
+			Master.optimize();
 
-		 for (i = 0; i < itrNum ; i++)
-		 {
-		 double sol_val = lambda[i].get (GRB_DoubleAttr_X);
-		 //if (sol[i] > 0.999 && sol[i] < 1.001)
-		 cout << "lambda[" << i << "]=" << sol_val << endl;
-		 }
-		 }
-		 */
+			double objValue = Master.get(GRB_DoubleAttr_ObjVal);
+			cout << "objective with binary y and the last added route: " << objValue
+				 << "\n";
+
+			/*
+			 if (Master.get (GRB_IntAttr_SolCount) > 0)
+			 {
+
+			 for (i = 0; i < itrNum ; i++)
+			 {
+			 double sol_val = lambda[i].get (GRB_DoubleAttr_X);
+			 //if (sol[i] > 0.999 && sol[i] < 1.001)
+			 cout << "lambda[" << i << "]=" << sol_val << endl;
+			 }
+			 }
+			 */
+		}
 	}
 	catch (GRBException e)
 	{
@@ -923,7 +997,7 @@ int main(int argc, char *argv[])
 	delete env;
 	env = nullptr;
 
-	reportTime(beginTime, beginWallClock);
+	// reportTime(beginTime, beginWallClock);
 
 	return 0;
 }

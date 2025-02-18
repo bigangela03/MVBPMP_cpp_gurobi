@@ -1,6 +1,13 @@
 #ifndef DOMINANCE_INAB_H
 #define DOMINANCE_INAB_H
 
+// useing bit operation to calculate 2^i has a problem like below
+//  i=30: 1073741824
+//  i=31: -2147483648
+//  i=32: 1
+//  i=33: 2
+// when i>=31, it starts to repeat i=0, 1...., so we need to use pow() function
+
 // this version introduce bigM in labels
 
 // this version dropped vector<vector<vector<double>>> newLabelSet, but only use vector<int>numNewlyAddedLabels (and vector<int> numNewlyAddedInLastIteration),
@@ -86,7 +93,7 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
 
     for (int i = 0; i < n; i++)
     {
-        twoPow[i] = 1 << i;
+        twoPow[i] = pow(2, i);
         allOnes += twoPow[i];
     }
 

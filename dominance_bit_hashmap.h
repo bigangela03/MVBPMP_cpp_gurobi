@@ -2,7 +2,7 @@
 #define DOMINANCE_BIT_HASHMAP_H
 
 //!!!!!!!!!!!!!!!!!!! NOT WORKING !!!!!!!!!!!!!!!!!!!!!!!!!!
-//the data structre of hashmap is not working now!!!!!!!!!!!
+// the data structre of hashmap is not working now!!!!!!!!!!!
 
 // I generate only one hashmap for all labels of all nodes; the hashmap maps key (binary representation of visited nodes to decimal) to visitited nodes, distance, and cost array.
 //  But there is a problem.
@@ -13,8 +13,6 @@
 
 // This code is only for complete graph right now, i.e., any two nodes are connected
 // since I didn't consider the vertex incidence matrix, only iterate nodes from 0 to n-1
-
-
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -87,7 +85,7 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
 
     long *twoPow = new long[n];
     for (int i = 0; i < n; i++)
-        twoPow[i] = 1 << i;
+        twoPow[i] = pow(2, i);
 
     vector<unordered_set<long>> bigLambda_allNodesLableSet;
     unordered_map<long, vector<double>> key2routeMap;
