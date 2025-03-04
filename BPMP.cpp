@@ -1,3 +1,5 @@
+// added preprocess and force some y, z variables zero in master problem, and some x variables zero in pricing problem
+
 #include "gurobi_c++.h"
 #include <cassert>
 #include <cstdlib>
@@ -27,11 +29,14 @@ using namespace std::chrono;
 // (3) model.setCallback(&cb);
 // on the contrary, if need to use ratio cut, then the above 3 commands need to be active
 // it has to be done manually since if we use (2) and (3) in if(USE_RATIO_CUT), when it is true, the program has problems as I observed.
+
 bool USE_RATIO_CUT = false;
 
-bool USE_PROFITABLE_2_NODES_CYCLES = true;
+bool USE_PROFITABLE_2_NODES_CYCLES = false;
 
 bool PRINT_VAR_VALUE = true;
+
+bool ADD_PREPROCESS = true;
 
 #define EPSILON 0.00001
 double capacity;
@@ -206,6 +211,8 @@ int main(int argc, char *argv[])
 
 			// route.printStats();
 			// route.printData();
+			cout << "reading file: " << filename << endl;
+			;
 
 			int n = route.numOfNode;
 			double wt[n][n];
@@ -246,6 +253,86 @@ int main(int argc, char *argv[])
 					u[i][j] = new GRBVar[n];
 			}
 
+			//===> add preprocessing
+			//===> check if visiting some arcs over distance limit
+			vector<vector<double>> inaccessibleArcs;
+			vector<vector<int>> nodeNeighbors; // it is not used right now since it makes dominance run slower
+			vector<vector<int>> nodeInaccNeighbors;
+			if (ADD_PREPROCESS)
+			{
+				int startingNode = 0;
+				int endingNode = n - 1;
+
+				// initialize nodeNeighbors and nodeInaccNeighbors
+				for (int i = 0; i < n; i++)
+				{
+					vector<int> neighbors;
+					if (i != endingNode)
+						for (int j = 0; j < n; j++)
+						{
+							if (j != startingNode)
+								neighbors.push_back(j);
+						}
+					nodeNeighbors.push_back(neighbors);
+
+					vector<int> neighbors2;
+					nodeInaccNeighbors.push_back(neighbors2);
+				}
+
+				// find the arcs violate distance limit
+				for (int i = 0; i < n; i++)
+					for (int j = 0; j < n; j++)
+					{
+						if (i != startingNode && i != endingNode && j != endingNode && j != startingNode && i != j)
+						{
+							double distTemp = dis[startingNode][i] + dis[i][j] + dis[j][endingNode];
+							if (distTemp > (double)route.DIS)
+							{
+								vector<double> arcTemp = {(double)i, (double)j, distTemp};
+								inaccessibleArcs.push_back(arcTemp);
+
+								// update nodeInaccNeighbors
+								nodeInaccNeighbors[i].push_back(j);
+
+								// update nodeNeighbors
+								auto it = find(nodeNeighbors[i].begin(), nodeNeighbors[i].end(), j);
+
+								if (it != nodeNeighbors[i].end())
+								{
+									nodeNeighbors[i].erase(it);
+								}
+							}
+						}
+					}
+				cout << "# of inaccessibleArcs = " << inaccessibleArcs.size() << endl;
+
+				// for (auto nodePairs : inaccessibleArcs)
+				// {
+				// 	for (auto node : nodePairs)
+				// 		cout << node << " ";
+				// 	cout << endl;
+				// }
+
+				// cout << "===> nodeInaccNeighbors:" << endl;
+				// for (int i = 0; i < n; i++)
+				// {
+				// 	cout << "node " << i << endl;
+				// 	for (auto &neighbor : nodeInaccNeighbors[i])
+				// 		cout << neighbor << " ";
+				// 	cout << endl;
+				// }
+
+				// cout << "===> nodeNeighbors:" << endl;
+				// for (int i = 0; i < n; i++)
+				// {
+				// 	cout << "node " << i << endl;
+				// 	for (auto &neighbor : nodeNeighbors[i])
+				// 		cout << neighbor << " ";
+				// 	cout << endl;
+				// }
+			}
+			auto start = std::chrono::high_resolution_clock::now();
+
 			try
 			{
 				int j, k;
@@ -285,6 +372,43 @@ int main(int argc, char *argv[])
 					y[i][0].set(GRB_DoubleAttr_UB, 0);
 					x[n - 1][i].set(GRB_DoubleAttr_UB, 0);
 					y[n - 1][i].set(GRB_DoubleAttr_UB, 0);
+				}
+
+				if (ADD_PREPROCESS)
+				{
+					//===> preprocess 1
+					for (i = 0; i < n; i++)
+					{
+						vector<int> nbsTemp = nodeInaccNeighbors[i];
+						for (j = 0; j < nodeInaccNeighbors[i].size(); j++)
+						{
+							x[i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+							y[i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+							for (k = 0; k < n; k++)
+							{
+								u[i][nbsTemp[j]][k].set(GRB_DoubleAttr_UB, 0);
+								u[i][k][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+								u[k][nbsTemp[j]][i].set(GRB_DoubleAttr_UB, 0);
+							}
+						}
+					}
+
+					//===> preprocess 2
+					int numViolatedTriples = 0;
+					int startingNode = 0;
+					int endingNode = n - 1;
+					for (int i = 0; i < n; i++)
+						// if (i != startingNode && i != endingNode)
+						if (i != 0 && i != n - 1)
+							for (auto &k : nodeNeighbors[i])
+								for (auto &j : nodeNeighbors[k])
+									if (i != j)
+										if (dis[startingNode][i] + dis[i][k] + dis[k][j] + dis[j][endingNode] > (double)route.DIS)
+										{
+											u[i][j][k].set(GRB_DoubleAttr_UB, 0);
+											numViolatedTriples++;
+										}
+					cout << "numViolatedTriples=" << numViolatedTriples << endl;
 				}
 
 				// vehicle goes out of node 1
@@ -448,12 +572,14 @@ int main(int argc, char *argv[])
 				//****** Must set LazyConstraints parameter when using lazy constraints
 				// 1 means use lazy constraint; 0 means not using lazy constraints
 				// model.set(GRB_IntParam_LazyConstraints, 0);
-				model.set(GRB_IntParam_LazyConstraints, 1);
+				// model.set(GRB_IntParam_LazyConstraints, 1);
 
 				//****** Set callback function
 				// when USE_RATIO_CUT=false, ratioSet is a pointer to NULL
-				printIntSol cb = printIntSol(x, y, u, ratioSet, n);
-				model.setCallback(&cb);
+				// printIntSol cb = printIntSol(x, y, u, ratioSet, n);
+				// model.setCallback(&cb);
+
+				model.getEnv().set(GRB_IntParam_OutputFlag, 0); // set quiet mode
 
 				// Optimize model
 				model.optimize();
@@ -485,6 +611,13 @@ int main(int argc, char *argv[])
 					for (i = 0; i < n; i++)
 						delete[] sol[i];
 					delete[] sol;
+
+					double objValue = model.get(GRB_DoubleAttr_ObjVal);
+					cout << "obj value: " << objValue << endl;
+
+					auto end = std::chrono::high_resolution_clock::now();
+					chrono::duration<double> elapsed = end - start;
+					cout << "Running time: " << elapsed.count() << " seconds" << endl;
 				}
 			}
 			catch (GRBException e)

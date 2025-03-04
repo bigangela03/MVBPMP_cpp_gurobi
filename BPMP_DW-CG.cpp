@@ -1,5 +1,6 @@
 // This is an example from https://groups.google.com/g/gurobi/c/pkBNfu-iX0k
 
+// added preprocess and force some y, z variables zero in master problem, and some x variables zero in pricing problem
 //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 // although we read vehicle data, we only consider one vehicle scenario whose route is from 0 to n-1 right now
 
@@ -83,12 +84,13 @@ int main(int argc, char *argv[])
 {
 
 	string pricingMethod;
-	bool ADD_PREPROCESS_1 = true;
-	bool ADD_PREPROCESS_2 = true;
-	bool addNodeInaccNeighbors = true;
+	bool ADD_PREPROCESS = true;
 
-	if (addNodeInaccNeighbors)
-		ADD_PREPROCESS_1 = true;
+	//===> for dominance method solving pricing problem
+	// if it is true, finish dominance process when the first maxNumNegativeRoutes are found
+	// if it is false, then return at most maxNumNegativeRoutes good routes after dominance method is completed
+	bool returnFirstFoundGoodRoutes = false;
+	int maxNumNegativeRoutes = 2;
 
 	//********* only read graph info and vehicle info by arguments
 	//********* doesn't go through the graph info in the data folder
@@ -249,7 +251,7 @@ int main(int argc, char *argv[])
 	vector<vector<double>> inaccessibleArcs;
 	vector<vector<int>> nodeNeighbors; // it is not used right now since it makes dominance run slower
 	vector<vector<int>> nodeInaccNeighbors;
-	if (ADD_PREPROCESS_1)
+	if (ADD_PREPROCESS)
 	{
 		// initialize nodeNeighbors and nodeInaccNeighbors
 		for (int i = 0; i < n; i++)
@@ -442,39 +444,39 @@ int main(int argc, char *argv[])
 				z[i][0][j].set(GRB_DoubleAttr_UB, 0);
 				z[n - 1][i][j].set(GRB_DoubleAttr_UB, 0);
 			}
+		}
 
-			if (addNodeInaccNeighbors)
-			{
+		if (ADD_PREPROCESS)
+		{
+			for (int i = 0; i < n; i++)
 				for (j = 0; j < nodeInaccNeighbors[i].size(); j++)
 				{
 					vector<int> nbsTemp = nodeInaccNeighbors[i];
+					// in BPMP model, we also set x[i][nbsTemp[j]]=0, but in CG's master problem, there is no x variables.
+					// x is only in pricing problem.
 					y[i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
 					for (k = 0; k < n; k++)
 					{
 						z[i][nbsTemp[j]][k].set(GRB_DoubleAttr_UB, 0);
 						z[i][k][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
-						z[k][i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+						// z[k][i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+						z[k][nbsTemp[j]][i].set(GRB_DoubleAttr_UB, 0);
 					}
 				}
-			}
 
-			if (ADD_PREPROCESS_2)
-			{
-				int numViolatedTriples = 0;
-				for (int i = 0; i < n; i++)
-					if (i != startingNode && i != endingNode)
-						for (auto &k : nodeNeighbors[i])
-							for (auto &j : nodeNeighbors[k])
-								if (i != j)
-									if (dis_v[startingNode][i] + dis_v[i][k] + dis_v[k][j] + dis_v[j][endingNode] > disLimit)
-									{
-										z[i][j][k].set(GRB_DoubleAttr_UB, 0);
-										numViolatedTriples++;
-									}
-				cout << "numViolatedTriples=" << numViolatedTriples;
-			}
+			int numViolatedTriples = 0;
+			for (int i = 0; i < n; i++)
+				if (i != startingNode && i != endingNode)
+					for (auto &k : nodeNeighbors[i])
+						for (auto &j : nodeNeighbors[k])
+							if (i != j)
+								if (dis_v[startingNode][i] + dis_v[i][k] + dis_v[k][j] + dis_v[j][endingNode] > disLimit)
+								{
+									z[i][j][k].set(GRB_DoubleAttr_UB, 0);
+									numViolatedTriples++;
+								}
+			cout << "numViolatedTriples=" << numViolatedTriples << endl;
 		}
-
 		// Constraints of master problem!
 
 		GRBConstr **arcFlowCapacity = new GRBConstr *[n];
@@ -528,9 +530,7 @@ int main(int argc, char *argv[])
 
 		bool findSolutionInThisIteration;
 
-		double **sol = new double *[n];
-		for (i = 0; i < n; i++)
-			sol[i] = new double[n];
+		vector<vector<vector<double>>> solNew;
 
 		while (true)
 		{
@@ -629,8 +629,8 @@ int main(int argc, char *argv[])
 			}
 
 			//================> Pricing Problem <================
-			// double **sol = new double *[n];
-			double objValue_PP;
+			// double objValue_PP;
+			vector<double> objValue_PP_vec; // stores the objValue of each route, the cost is asending, such as, objValue_PP[0]=-1.9, objValue_PP[1] =-1.6, objValue_PP[2]=-1.2...
 
 			// if (USE_DOMINACE_METHOD_FOR_SUB_PROBLEM)
 			if (pricingMethod == "dominance")
@@ -639,43 +639,62 @@ int main(int argc, char *argv[])
 				//===> for example, selectedRoute[0]=0, selectedRoute[1]=6, selectedRoute[2]=9
 				//===> it means the route is 1->7->10
 				// return the cost of the selected Route !!!
-				vector<int> selectedRoute;
+				// vector<int> selectedRoute;
+				vector<vector<int>> selectedRoutes_vec;
 
 				// runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute, startingNode, endingNode, nodeNeighbors);
-				runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute, startingNode, endingNode);
+				// runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute, startingNode, endingNode);
+				// right now these arguments is only for dominance_inab_faster2.h. for other dominance variants, use the above function
+				runDominance(n, dis_v, xCoeff, disLimit, objValue_PP_vec, selectedRoutes_vec, returnFirstFoundGoodRoutes, maxNumNegativeRoutes, startingNode, endingNode);
 
-				objValue_PP += pi_lambda_sum;
-				objValue_PP = -objValue_PP;
-				printf("objective of Pricing problem (dominace): %lf\n", objValue_PP);
-
-				if (selectedRoute.size() > 1)
+				if (objValue_PP_vec.size() == 0)
 				{
-					findSolutionInThisIteration = true;
-
-					//===> pre-assign sol array value
-					for (i = 0; i < n; i++)
-						for (j = 0; j < n; j++)
-							sol[i][j] = 0;
-
-					//===> assign value from returned route to sol array
-					for (i = 0; i < selectedRoute.size() - 1; i++)
-						sol[selectedRoute[i]][selectedRoute[i + 1]] = 1;
-
-					if (PRINT_FOR_DEBUG)
-					{
-						cout << "selected reoute" << endl;
-						for (i = 0; i < selectedRoute.size() - 1; i++)
-							cout << selectedRoute[i] << "->" << selectedRoute[i + 1] << ", ";
-						cout << endl;
-					}
+					cout << "ERROR: objValue_PP_vec should have at least one element." << endl;
+					exit(1);
 				}
 				else
 				{
-					printf("ERROR: after dominance method, there are at least two nodes in selected route!\n");
-					exit(1);
+					//===> pricing model of dominance doesn't include the constant. Add it now
+					for (i = 0; i < objValue_PP_vec.size(); i++)
+					{
+						double objValue_PP = objValue_PP_vec[i];
+						objValue_PP += pi_lambda_sum;
+						objValue_PP = -objValue_PP;
+						objValue_PP_vec[i] = objValue_PP;
+					}
 				}
+
+				printf("best found objective of Pricing problem (dominace): %lf\n", objValue_PP_vec[0]);
+
+				solNew.clear();
+				for (auto &selectedRoute : selectedRoutes_vec)
+					if (selectedRoute.size() > 1)
+					{
+						findSolutionInThisIteration = true;
+
+						vector<vector<double>> oneRouteSol(n, vector<double>(n, 0)); // initialize nxn matrix with 0
+						//===> assign value from returned route to sol array
+						for (i = 0; i < selectedRoute.size() - 1; i++)
+							oneRouteSol[selectedRoute[i]][selectedRoute[i + 1]] = 1;
+
+						solNew.push_back(oneRouteSol);
+
+						if (PRINT_FOR_DEBUG)
+						{
+							cout << "selected reoute" << endl;
+							for (i = 0; i < selectedRoute.size() - 1; i++)
+								cout << selectedRoute[i] << "->" << selectedRoute[i + 1] << ", ";
+							cout << endl;
+						}
+					}
+					else
+					{
+						printf("ERROR: after dominance method, there are at least two nodes in selected route!\n");
+						exit(1);
+					}
 			}
 			// else
+			// right now Gurobi returns only 1 route
 			else if (pricingMethod == "gurobi")
 			{
 
@@ -709,7 +728,7 @@ int main(int argc, char *argv[])
 					x[i][0].set(GRB_DoubleAttr_UB, 0);
 					x[n - 1][i].set(GRB_DoubleAttr_UB, 0);
 				}
-				if (addNodeInaccNeighbors)
+				if (ADD_PREPROCESS)
 				{
 					for (i = 0; i < n; i++)
 					{
@@ -823,29 +842,31 @@ int main(int argc, char *argv[])
 				PPmodel.write("DW_pricingModel.lp");
 				PPmodel.optimize();
 
-				// double objValue_PP = PPmodel.get(GRB_DoubleAttr_ObjVal);
-				objValue_PP = PPmodel.get(GRB_DoubleAttr_ObjVal);
+				double objValue_PP = PPmodel.get(GRB_DoubleAttr_ObjVal);
 
 				objValue_PP = -objValue_PP;
+				objValue_PP_vec.push_back(objValue_PP);
 				cout << "objective of PP problem (gurobi): " << objValue_PP << "\n";
-
-				// if (objValue_PP < 0.000001 && objValue_PP > -0.000001)
-				// {
-				// 	cout << "Optimum Found!" << endl;
-				// 	convergePoint = objValue_master;
-				// 	PPobj = objValue_PP;
-				// 	break;
-				// }
 
 				if (PPmodel.get(GRB_IntAttr_SolCount) > 0)
 				{
 
 					findSolutionInThisIteration = true;
 
-					// Extract solution and create new column
+					vector<vector<double>> oneRouteSol(n, vector<double>(n, 0)); // initialize nxn matrix with 0
 
+					// Extract solution and create new column
+					double **sol = new double *[n];
 					for (i = 0; i < n; i++)
+						sol[i] = new double[n];
+					for (i = 0; i < n; i++)
+					{
 						sol[i] = PPmodel.get(GRB_DoubleAttr_X, x[i], n);
+						for (j = 0; j < n; j++)
+							oneRouteSol[i][j] = sol[i][j];
+					}
+
+					solNew.push_back(oneRouteSol);
 				}
 
 				for (i = 0; i < n; i++)
@@ -855,44 +876,58 @@ int main(int argc, char *argv[])
 			}
 
 			//======> AFTER SOLVING PRICING PROBLEM AND READ ROUTE INFO, ADD NEW VAR TO MASTER PROBLEM <======
+			double objValue_PP = objValue_PP_vec[0]; // the best obj found
+			if (objValue_PP < 0.000001 && objValue_PP > -0.000001)
+			{
+				cout << "Optimum Found!" << endl;
+
+				convergePoint = objValue_master;
+				PPobj = objValue_PP;
+
+				break;
+			}
+
 			if (findSolutionInThisIteration)
 			{
-
-				GRBColumn col;
-
-				// make a new column in arc flow capacity constraint
-				for (i = 0; i < n; i++)
-					for (j = 0; j < n; j++)
-						if (sol[i][j] > 0.999 && sol[i][j] < 1.001)
-						{
-							col.addTerm(-capacity, arcFlowCapacity[i][j]);
-							// unvisitedNodes.erase(i);
-						}
-				// if (PRINT_FOR_DEBUG)
+				cout << "======> assigning routes to master model" << endl;
+				int count = 1;
+				for (auto sol : solNew)
 				{
-					printf("selected reoute: \n");
+					GRBColumn col;
+
+					// make a new column in arc flow capacity constraint
 					for (i = 0; i < n; i++)
 						for (j = 0; j < n; j++)
 							if (sol[i][j] > 0.999 && sol[i][j] < 1.001)
-								printf("%d->%d ", i, j);
-					printf("\n");
+							{
+								col.addTerm(-capacity, arcFlowCapacity[i][j]);
+								// unvisitedNodes.erase(i);
+							}
+					// if (PRINT_FOR_DEBUG)
+					{
+						printf("selected reoute: \n");
+						for (i = 0; i < n; i++)
+							for (j = 0; j < n; j++)
+								if (sol[i][j] > 0.999 && sol[i][j] < 1.001)
+									printf("%d->%d ", i, j);
+						printf("\n");
+					}
+					// make a new column in lamdaSum constraint
+					col.addTerm(1, lambdaSum[0]);
+
+					// add the new column into model
+					double newLambdaCoeff = 0;
+
+					for (i = 0; i < n; i++)
+						for (j = 1; j < n; j++)
+							newLambdaCoeff -= cost * vw * dis_v[i][j] * sol[i][j];
+
+					cout << "newLambdaCoeff=" << newLambdaCoeff << endl;
+
+					lambda.push_back(
+						Master.addVar(0.0, GRB_INFINITY, newLambdaCoeff, GRB_CONTINUOUS, col, "lambda_itr" + itos(itrNum) + "_" + itos(count)));
+					count++;
 				}
-
-				// make a new column in lamdaSum constraint
-				col.addTerm(1, lambdaSum[0]);
-
-				// add the new column into model
-				double newLambdaCoeff = 0;
-
-				for (i = 0; i < n; i++)
-					for (j = 1; j < n; j++)
-						newLambdaCoeff -= cost * vw * dis_v[i][j] * sol[i][j];
-
-				cout << "newLambdaCoeff=" << newLambdaCoeff << endl;
-
-				lambda.push_back(
-					Master.addVar(0.0, GRB_INFINITY, newLambdaCoeff, GRB_CONTINUOUS, col,
-								  "lambda_" + itos(itrNum)));
 
 				// // --------if a node is not visited, then corresponding y and z are zeros----------
 				// for (auto &i : unvisitedNodes)
@@ -916,16 +951,6 @@ int main(int argc, char *argv[])
 				exit(1);
 			}
 
-			if (objValue_PP < 0.000001 && objValue_PP > -0.000001)
-			{
-				cout << "Optimum Found!" << endl;
-
-				convergePoint = objValue_master;
-				PPobj = objValue_PP;
-
-				break;
-			}
-
 			// Master.write("AddingVar.lp");
 
 			// if (itrNum >= 3)
@@ -934,10 +959,10 @@ int main(int argc, char *argv[])
 			itrNum++;
 		}
 
-		for (i = 0; i < n; i++)
-			delete[] sol[i];
-		delete[] sol;
-		sol = nullptr;
+		// for (i = 0; i < n; i++)
+		// 	delete[] sol[i];
+		// delete[] sol;
+		// sol = nullptr;
 
 		if (convergePoint < -99)
 			cout << "No Result" << endl;

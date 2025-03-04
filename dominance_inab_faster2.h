@@ -56,31 +56,19 @@
 
 void printLabelSet(vector<vector<double>>, double);
 void printOneLabel(vector<double>, double);
-bool compareToLabel(vector<double>, vector<double>, int, double);
 
 // using nodeNeighbors slow down the running compared with succ=0 to n-1, we can actually drop nodeNeighbors
 // void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit, double *obj, vector<int> &nodesOnRoute, int startingNode, int endingNode, vector<vector<int>> &nodeNeighbors)
-void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit, double *obj, vector<int> &nodesOnRoute, int startingNode, int endingNode)
-{
+// void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit, double *obj, vector<int> &nodesOnRoute, int startingNode, int endingNode)
+void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double disLimit, vector<double> &obj, vector<vector<int>> &nodesOnRoute, bool RETRURN_WHEN_GIVEN_NUM_NEGATIVE_PATH_FOUND, int maxNumNegativeRoutes, int startingNode, int endingNode)
 
+{
     //===> set up parameters used in dominance.h
     // int startingNode = 0;
     // int endingNode = n - 1;
     bool PRINT_FOR_DEBUG = false;
-    double bigM = 10000000; // bigM has to be big enough, so than when checking domincated labels inside F set, when comparing two equivalent labels, it helps to find label with more bigM
-    double verySmallNum = 0.0000001;
-
-    // vector<double> targetLabel;
-    // targetLabel.push_back(1);
-    // targetLabel.push_back(0);
-    // targetLabel.push_back(0);
-    // targetLabel.push_back(0);
-    // targetLabel.push_back(3);
-    // targetLabel.push_back(bigM);
-    // targetLabel.push_back(2);
-    // targetLabel.push_back(0);
-    // targetLabel.push_back(0);
-    // targetLabel.push_back(0);
+    double bigM = 10000000;           // bigM has to be big enough, so than when checking domincated labels inside F set, when comparing two equivalent labels, it helps to find label with more bigM
+    double verySmallNum = 0.00000001; // (8 zeros)
 
     if (startingNode < 0 || startingNode > n - 1)
     {
@@ -409,6 +397,22 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                 }
             }
         }
+
+        if (RETRURN_WHEN_GIVEN_NUM_NEGATIVE_PATH_FOUND)
+        {
+            int count = 0;
+            for (auto &label : bigLambda_allNodesLableSet[endingNode])
+            {
+                if (label[n + 2] < -verySmallNum)
+                {
+                    // cout << "===> find a negative cost path. Stop dominance method." << endl;
+                    count++;
+                    if (count >= maxNumNegativeRoutes)
+                        break;
+                }
+            }
+        }
+
         for (int i = 0; i < n; i++)
             if (numNewlyAddedLabels[i] > 0) //===> LINE 16 in ESPPRC(p) PSEUDO-CODE//===> LINE 16 in ESPPRC(p) PSEUDO-CODE
             {
@@ -444,75 +448,200 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
         printLabelSet(bigLambda_allNodesLableSet[n - 1], bigM);
     }
 
-    double minCost = numeric_limits<double>::max();
-    vector<double> bestLabel;
+    // ===> when RETRURN_WHEN_GIVEN_NUM_NEGATIVE_PATH_FOUND = false
+    // most negative cost route is found after completing the whole labeling process
+    // ===> when RETRURN_WHEN_GIVEN_NUM_NEGATIVE_PATH_FOUND = true
+    // the dominance method will stop labeling process when maxNumNegativeRoutes (passed as arguments)
+    // found in the ending node lables
 
-    for (auto &labelTemp : bigLambda_allNodesLableSet[n - 1])
+    //===> (1) this is the code for only selecting the most negative cost route, which means only one route is selected
+    if (!RETRURN_WHEN_GIVEN_NUM_NEGATIVE_PATH_FOUND & maxNumNegativeRoutes == 1)
     {
-        if (labelTemp[n + 2] < minCost)
-        {
-            bestLabel.clear();
-            minCost = labelTemp[n + 2];
+        double minCost = numeric_limits<double>::max();
+        vector<double> bestLabel;
+        vector<int> routeTemp;
 
-            for (auto &ele : labelTemp)
-                bestLabel.push_back(ele);
+        for (auto &labelTemp : bigLambda_allNodesLableSet[n - 1])
+        {
+            if (labelTemp[n + 2] < minCost)
+            {
+                bestLabel.clear();
+                minCost = labelTemp[n + 2];
+
+                for (auto &ele : labelTemp)
+                    bestLabel.push_back(ele);
+            }
+        }
+
+        if (PRINT_FOR_DEBUG)
+        {
+            cout << "best label:" << endl;
+            for (auto &ele : bestLabel)
+                cout << ele << " ";
+            cout << endl;
+        }
+
+        obj.push_back(minCost);
+
+        for (int i = 0; i < n; i++)
+            routeTemp.push_back(0);
+
+        //===> for example: label=[1, bigM, 2, 3, 3, 12.8, -1.28], n=4
+        //===> it means, node 0 is visted first, then node 2, then node 3: 0->2->3
+
+        double sum = 0;
+        double numAllVistedNodes;
+        for (int i = 0; i < n; i++)
+        {
+            if (bestLabel[i] < bigM - verySmallNum && bestLabel[i] > verySmallNum)
+            {
+                int index = (long)bestLabel[i];
+                routeTemp[index - 1] = i;
+                numAllVistedNodes = bestLabel[n];
+                sum += bestLabel[i];
+            }
+        }
+        if (sum != numAllVistedNodes * (numAllVistedNodes + 1) / 2)
+        {
+            printf("ERROR: the number in first n elements of a label in dominace method should be in set{1, 2, .., numAllVistedNodes}\n");
+            printf("the visit order jumped, for example, label=[1, bigM, 2, 4, #, dis, cost] (n=4)\n");
+            printf("the right result is supposed to be label=[1,bigM,2,3, #,dis,cost]\n");
+            exit(1);
+        }
+        if (PRINT_FOR_DEBUG)
+        {
+            cout << "selected route before removing 0s:" << endl;
+            for (auto &ele : routeTemp)
+                cout << ele << " ";
+            cout << endl;
+
+            cout << "# of visited nodes: " << numAllVistedNodes << endl;
+        }
+
+        routeTemp.erase(routeTemp.begin() + (int)numAllVistedNodes, routeTemp.begin() + n);
+
+        if (PRINT_FOR_DEBUG)
+        {
+            cout << "selected route after removing 0s:" << endl;
+            for (auto &ele : routeTemp)
+                cout << ele << " ";
+            cout << endl;
+        }
+        obj.push_back(bestLabel[n + 2]);
+
+        nodesOnRoute.push_back(routeTemp);
+    }
+    //===> (2) find maxNumNegativeRoutes after the whole process is completed
+    //===> (3) find first found one or several negative routes
+    //===> NOTE: only find best at most maxNumNegativeRoutes routes, either negative or zero
+    else if ((!RETRURN_WHEN_GIVEN_NUM_NEGATIVE_PATH_FOUND & maxNumNegativeRoutes > 1) || (RETRURN_WHEN_GIVEN_NUM_NEGATIVE_PATH_FOUND))
+    {
+        double minCost = numeric_limits<double>::max();
+        double maxCost = -bigM;
+
+        vector<vector<double>> bestLabelsTemp;
+
+        //===> find first maxNumNegativeRoutes best labels, might be less if not enough negative routes found
+        for (auto &labelTemp : bigLambda_allNodesLableSet[n - 1])
+        {
+            // skip this label if its cost is positive
+            if (labelTemp[n + 2] > verySmallNum)
+                continue;
+
+            if (bestLabelsTemp.size() == 0)
+                bestLabelsTemp.push_back(labelTemp);
+            else if (bestLabelsTemp.size() < maxNumNegativeRoutes)
+            {
+                for (int i = 0; i < bestLabelsTemp.size(); i++)
+                    if (labelTemp[n + 2] < bestLabelsTemp[i][n + 2])
+                    {
+                        bestLabelsTemp.insert(bestLabelsTemp.begin() + i, labelTemp);
+                        break;
+                    }
+            }
+            else if (bestLabelsTemp.size() == maxNumNegativeRoutes)
+            {
+                for (int i = 0; i < bestLabelsTemp.size(); i++)
+                    if (labelTemp[n + 2] < bestLabelsTemp[i][n + 2])
+                    {
+                        bestLabelsTemp.pop_back();
+                        bestLabelsTemp.insert(bestLabelsTemp.begin() + i, labelTemp);
+                        break;
+                    }
+            }
+            else if (bestLabelsTemp.size() > maxNumNegativeRoutes)
+            {
+                cout << "ERROR: bestLabelsTemp size is over limit, which is not supposed to happen.";
+                exit(1);
+            }
+        }
+
+        if (PRINT_FOR_DEBUG)
+        {
+            cout << "best labels:" << endl;
+            for (int i = 0; i < bestLabelsTemp.size(); i++)
+                printOneLabel(bestLabelsTemp[i], bigM);
+            cout << endl;
+        }
+
+        //===> convert labels from found best lables to routes
+        for (int i = 0; i < bestLabelsTemp.size(); i++)
+        {
+            vector<double> bestLabel = bestLabelsTemp[i];
+            vector<int> routeTemp;
+            for (int i = 0; i < n; i++)
+                routeTemp.push_back(0);
+
+            //===> for example: label=[1, bigM, 2, 3, 3, 12.8, -1.28], n=4
+            //===> it means, node 0 is visted first, then node 2, then node 3: 0->2->3
+
+            double sum = 0;
+            double numAllVistedNodes;
+            for (int i = 0; i < n; i++)
+            {
+                if (bestLabel[i] < bigM - verySmallNum && bestLabel[i] > verySmallNum)
+                {
+                    int index = (long)bestLabel[i];
+                    routeTemp[index - 1] = i;
+                    numAllVistedNodes = bestLabel[n];
+                    sum += bestLabel[i];
+                }
+            }
+            if (sum != numAllVistedNodes * (numAllVistedNodes + 1) / 2)
+            {
+                printf("ERROR: the number in first n elements of a label in dominace method should be in set{1, 2, .., numAllVistedNodes}\n");
+                printf("the visit order jumped, for example, label=[1, bigM, 2, 4, #, dis, cost] (n=4)\n");
+                printf("the right result is supposed to be label=[1,bigM,2,3, #,dis,cost]\n");
+                exit(1);
+            }
+            if (PRINT_FOR_DEBUG)
+            {
+                cout << "selected route before removing 0s:" << endl;
+                for (auto &ele : routeTemp)
+                    cout << ele << " ";
+                cout << endl;
+
+                cout << "# of visited nodes: " << numAllVistedNodes << endl;
+            }
+
+            routeTemp.erase(routeTemp.begin() + (int)numAllVistedNodes, routeTemp.begin() + n);
+            if (PRINT_FOR_DEBUG)
+            {
+                cout << "selected route after removing 0s:" << endl;
+                for (auto &ele : routeTemp)
+                    cout << ele << " ";
+                cout << endl;
+            }
+
+            obj.push_back(bestLabel[n + 2]);
+
+            nodesOnRoute.push_back(routeTemp);
         }
     }
-
-    if (PRINT_FOR_DEBUG)
+    else
     {
-        cout << "best label:" << endl;
-        for (auto &ele : bestLabel)
-            cout << ele << " ";
-        cout << endl;
-    }
-
-    *obj = minCost;
-
-    for (int i = 0; i < n; i++)
-        nodesOnRoute.push_back(0);
-
-    //===> for example: label=[1, bigM, 2, 3, 3, 12.8, -1.28], n=4
-    //===> it means, node 0 is visted first, then node 2, then node 3: 0->2->3
-
-    double sum = 0;
-    double numAllVistedNodes;
-    for (int i = 0; i < n; i++)
-    {
-        if (bestLabel[i] < bigM - verySmallNum && bestLabel[i] > verySmallNum)
-        {
-            int index = (long)bestLabel[i];
-            nodesOnRoute[index - 1] = i;
-            numAllVistedNodes = bestLabel[n];
-            sum += bestLabel[i];
-        }
-    }
-    if (sum != numAllVistedNodes * (numAllVistedNodes + 1) / 2)
-    {
-        printf("ERROR: the number in first n elements of a label in dominace method should be in set{1, 2, .., numAllVistedNodes}\n");
-        printf("the visit order jumped, for example, label=[1, bigM, 2, 4, #, dis, cost] (n=4)\n");
-        printf("the right result is supposed to be label=[1,bigM,2,3, #,dis,cost]\n");
+        cout << "ERROR: there is not supposed to be in this scenario when searching for best several routes." << endl;
         exit(1);
-    }
-
-    if (PRINT_FOR_DEBUG)
-    {
-        cout << "selected route before removing 0s:" << endl;
-        for (auto &ele : nodesOnRoute)
-            cout << ele << " ";
-        cout << endl;
-
-        cout << "# of visited nodes: " << numAllVistedNodes << endl;
-    }
-
-    nodesOnRoute.erase(nodesOnRoute.begin() + (int)numAllVistedNodes, nodesOnRoute.begin() + n);
-
-    if (PRINT_FOR_DEBUG)
-    {
-        cout << "selected route after removing 0s:" << endl;
-        for (auto &ele : nodesOnRoute)
-            cout << ele << " ";
-        cout << endl;
     }
 }
 
@@ -539,17 +668,6 @@ void printOneLabel(vector<double> label, double bigM)
         else
             cout << temp << " ";
     cout << endl;
-}
-
-bool compareToLabel(vector<double> lab, vector<double> target, int n, double verySmallNum)
-{
-    bool result = true;
-    for (int i = 0; i < n; i++)
-    {
-        if (lab[i] > target[i] + verySmallNum || lab[i] < target[i] - verySmallNum)
-            result = false;
-    }
-    return result;
 }
 
 #endif
