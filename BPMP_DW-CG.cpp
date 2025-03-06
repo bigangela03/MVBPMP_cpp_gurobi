@@ -1,5 +1,16 @@
 // This is an example from https://groups.google.com/g/gurobi/c/pkBNfu-iX0k
 
+// In this version, I added BPMP LP before starting column generation.
+// Then use the routes from LP solution which satisfies distance limit and has no cycles
+// as the initial solution for master problem.
+// NOTE: RIGHT NOW IT ONLY WORKS FOR INSTANCES WHOSE LP OPTIMUM SOLUTION DOESN'T INCLUDE CYCLES
+// when there is cycle, the code will probably falls into endless cycles
+// THIS IS NOT COMPLETED WORK. SO ONLY TEST ON FOR EXAMPLE t10_05, t30_01 etc.
+// for t30_01, the running time doesn't descrease :(
+// so I decided to drop this idea
+// BTW, for t30_01, I returned 2 best routes from dominance method, but it seems in master problem only the best route has positive corresponding value in master problem.
+// so maybe we only need to return the best route from dominace.
+
 // added preprocess and force some y, z variables zero in master problem, and some x variables zero in pricing problem
 //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 // although we read vehicle data, we only consider one vehicle scenario whose route is from 0 to n-1 right now
@@ -62,11 +73,15 @@ bool USE_GA_FOR_INIT_SOL = false; // the experiment shows that a good initial so
 bool FORCE_TRIANGLE_INEQUALITY = true;
 // bool USE_DOMINACE_METHOD_FOR_SUB_PROBLEM = false; // if it is false, Gurobi will be used for pricing problem
 
-bool testOneRouteObjAndDist = false;
 bool toRemove_addInitialSolutionInPricingProblem = false;
 
-// double bigM = 10000000;
-double epsilon = numeric_limits<double>::epsilon();
+double bigM = 10000000;
+
+// epsilon() indicates the precision with which numbers close to 1 can be represented.
+// min() gives the lower bound of representable positive numbers
+// epsilon() is typically much larger than min();
+//  double epsilon = numeric_limits<double>::epsilon();
+double min_double = numeric_limits<double>::min();
 
 // itos is defined in ga.h as well
 //  string
@@ -79,12 +94,14 @@ double epsilon = numeric_limits<double>::epsilon();
 
 void reportTime(clock_t, auto);
 set<vector<int>> findTriangelInequalityViolation(double **, int);
+void findOneRouteFromCurrentNode(int &, int, vector<int> &, double &, double **, int, int, int);
 
 int main(int argc, char *argv[])
 {
 
 	string pricingMethod;
 	bool ADD_PREPROCESS = true;
+	bool USE_LP_SOL_AS_INIT_SOL_IN_MASTER = true; // solve BPMP LP, and then pick up the elementary routes in solution as the initial routes in master problem
 
 	//===> for dominance method solving pricing problem
 	// if it is true, finish dominance process when the first maxNumNegativeRoutes are found
@@ -116,9 +133,9 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	clock_t beginTime = clock();
+	// clock_t beginTime = clock();
 
-	auto beginWallClock = high_resolution_clock::now();
+	// auto beginWallClock = high_resolution_clock::now();
 
 	readData route;
 
@@ -201,7 +218,7 @@ int main(int argc, char *argv[])
 					nodeDemand += wt[j][i];
 			}
 
-			if (nodeDemand < 10 * epsilon)
+			if (nodeDemand < 10 * min_double)
 			{
 				cout << "ERROR: node " << i << " has no delivery request." << endl;
 				findNonUsedNode = true;
@@ -325,35 +342,36 @@ int main(int argc, char *argv[])
 		// }
 	}
 
+	clock_t beginTime = clock();
+
+	auto beginWallClock = high_resolution_clock::now();
+
 	GRBEnv *env = 0;
 
 	try
 	{
 		int i, j, k;
-		// Patterns
-		// double pat[][2];
 
-		//****** newCol[n-1][j]=0 and newCol[i][0]=0
-		double **newCol = new double *[n];
-		for (i = 0; i < n; i++)
-			newCol[i] = new double[n];
+		// //****** newCol[n-1][j]=0 and newCol[i][0]=0
+		// double **newCol = new double *[n];
+		// for (i = 0; i < n; i++)
+		// 	newCol[i] = new double[n];
 
-		for (i = 0; i < n; i++)
-		{
-			newCol[n - 1][i] = 0;
-			newCol[i][0] = 0;
+		// for (i = 0; i < n; i++)
+		// 	for (j = 0; j < n; j++)
+		// 		newCol[i][j] = 0;
 
-			for (j = 0; j < n; j++)
-				newCol[i][j] = 0;
-		}
+		// set up a new GRB environment
+		env = new GRBEnv();
 
 		//======> initial route solution <======
-		cout << "before using ga" << endl;
+		vector<vector<int>> selectedRoutesVec;
 		if (USE_GA_FOR_INIT_SOL)
 		{
 			// double disLimit = (double)route.DIS;
 
 			// right now it only returns the selected route, no customers and profit info
+			// returns only one routes as initial solution
 			vector<int> finalRoute = runga(n, price, cost, capacity, disLimit, vw, wt, dis_v);
 
 			cout << "========> selected route using genetic algorithm:" << endl;
@@ -361,46 +379,357 @@ int main(int argc, char *argv[])
 				cout << i << ",";
 			cout << endl;
 
-			for (i = 0; i < finalRoute.size() - 1; i++)
+			selectedRoutesVec.push_back(finalRoute);
+
+			// for (i = 0; i < finalRoute.size() - 1; i++)
+			// {
+			// 	newCol[finalRoute[i]][finalRoute[i + 1]] = 1;
+			// 	// unvisitedNodes.erase(finalRoute[i]);
+			// }
+		}
+		else if (USE_LP_SOL_AS_INIT_SOL_IN_MASTER)
+		{
+			cout << "start LP" << endl;
+			//===> returns multiple routes as initial solution
+			vector<vector<int>> finalRoutes;
+
+			GRBModel BPMPlp = GRBModel(*env);
+
+			//*** set up var y and triples variable z
+			GRBVar **y = nullptr;
+			GRBVar ***z = nullptr;
+			y = new GRBVar *[n];
+			z = new GRBVar **[n];
+			for (i = 0; i < n; i++)
 			{
-				newCol[finalRoute[i]][finalRoute[i + 1]] = 1;
-				// unvisitedNodes.erase(finalRoute[i]);
+				y[i] = new GRBVar[n];
+				z[i] = new GRBVar *[n];
+				for (int j = 0; j < n; j++)
+					z[i][j] = new GRBVar[n];
 			}
+			for (i = 0; i < n; i++)
+				for (j = 0; j < n; j++)
+				{
+					y[i][j] = BPMPlp.addVar(0.0, 1.0, 0, GRB_CONTINUOUS,
+											"y_" + itos(i) + "_" + itos(j));
+					for (k = 0; k < n; k++)
+					{
+						string s = "z_" + itos(i) + "_" + itos(j) + "_" + itos(k);
+						//*** in DW-CG, we force u<=capacity (capacity is the vehicle's capacity)
+						z[i][j][k] = BPMPlp.addVar(0.0, capacity, 0.0, GRB_CONTINUOUS, s);
+					}
+				}
+
+			for (i = 0; i < n; i++)
+			{
+				y[i][i].set(GRB_DoubleAttr_UB, 0);
+				y[i][0].set(GRB_DoubleAttr_UB, 0);
+				y[n - 1][i].set(GRB_DoubleAttr_UB, 0);
+
+				for (j = 0; j < n; j++)
+				{
+					z[i][j][0].set(GRB_DoubleAttr_UB, 0);
+					z[i][j][n - 1].set(GRB_DoubleAttr_UB, 0);
+					z[i][0][j].set(GRB_DoubleAttr_UB, 0);
+					z[n - 1][i][j].set(GRB_DoubleAttr_UB, 0);
+				}
+			}
+			if (ADD_PREPROCESS)
+			{
+				for (int i = 0; i < n; i++)
+					for (j = 0; j < nodeInaccNeighbors[i].size(); j++)
+					{
+						vector<int> nbsTemp = nodeInaccNeighbors[i];
+						// in BPMP model, we also set x[i][nbsTemp[j]]=0, but in CG's master problem, there is no x variables.
+						// x is only in pricing problem.
+						y[i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+						for (k = 0; k < n; k++)
+						{
+							z[i][nbsTemp[j]][k].set(GRB_DoubleAttr_UB, 0);
+							z[i][k][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+							// z[k][i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+							z[k][nbsTemp[j]][i].set(GRB_DoubleAttr_UB, 0);
+						}
+					}
+
+				for (int i = 0; i < n; i++)
+					if (i != startingNode && i != endingNode)
+						for (auto &k : nodeNeighbors[i])
+							for (auto &j : nodeNeighbors[k])
+								if (i != j)
+									if (dis_v[startingNode][i] + dis_v[i][k] + dis_v[k][j] + dis_v[j][endingNode] > disLimit)
+										z[i][j][k].set(GRB_DoubleAttr_UB, 0);
+
+				// cout << "numViolatedTriples=" << numViolatedTriples << endl;
+			}
+
+			GRBVar **x = nullptr;
+			GRBVar s[n];
+			GRBVar theta[n][n];
+
+			x = new GRBVar *[n];
+			for (i = 0; i < n; i++)
+				x[i] = new GRBVar[n];
+
+			for (i = 0; i < n; i++)
+			{
+				s[i] = BPMPlp.addVar(0.0, n, 0.0, GRB_CONTINUOUS,
+									 "s_" + itos(i));
+				for (j = 0; j < n; j++)
+				{
+					x[i][j] = BPMPlp.addVar(0.0, 1.0, 0, GRB_CONTINUOUS,
+											"x_" + itos(i) + "_" + itos(j));
+					theta[i][j] = BPMPlp.addVar(
+						0.0, GRB_INFINITY, 0.0, GRB_CONTINUOUS,
+						"theta_" + itos(i) + "_" + itos(j));
+				}
+			}
+
+			for (i = 0; i < n; i++)
+			{
+				x[i][i].set(GRB_DoubleAttr_UB, 0);
+				x[i][0].set(GRB_DoubleAttr_UB, 0);
+				x[n - 1][i].set(GRB_DoubleAttr_UB, 0);
+				theta[i][i].set(GRB_DoubleAttr_UB, 0);
+				theta[i][0].set(GRB_DoubleAttr_UB, 0);
+				theta[n - 1][i].set(GRB_DoubleAttr_UB, 0);
+			}
+			if (ADD_PREPROCESS)
+			{
+				for (i = 0; i < n; i++)
+				{
+					vector<int> nbsTemp = nodeInaccNeighbors[i];
+					for (j = 0; j < nbsTemp.size(); j++)
+					{
+						x[i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+					}
+				}
+			}
+
+			// vehicle goes out of node 1
+			GRBLinExpr expr1 = 0.0;
+			for (i = 1; i < n; i++)
+				expr1 += x[0][i];
+			BPMPlp.addConstr(expr1 == 1, "origin");
+
+			// vehicle goes back to node n
+			GRBLinExpr expr2 = 0.0;
+			for (i = 0; i < n - 1; i++)
+				expr2 += x[i][n - 1];
+			BPMPlp.addConstr(expr2 == 1, "destination");
+
+			// flow conservation
+			for (int k = 1; k < n - 1; k++)
+			{
+				GRBLinExpr expr = 0;
+				for (i = 0; i < n - 1; i++)
+					expr += x[i][k];
+				for (j = 1; j < n; j++)
+					expr -= x[k][j];
+				BPMPlp.addConstr(expr == 0, "flow_conservation_" + itos(k));
+			}
+
+			// distance
+			GRBLinExpr expr3 = 0.0;
+			for (i = 0; i < n - 1; i++)
+				for (j = 1; j < n; j++)
+					expr3 += dis_v[i][j] * x[i][j];
+			BPMPlp.addConstr(expr3 <= disLimit, "distance");
+
+			// node degree less than 1
+			for (int k = 1; k < n - 1; k++)
+			{
+				GRBLinExpr expr = 0.0;
+				for (i = 0; i < n - 1; i++)
+					expr += x[i][k];
+				BPMPlp.addConstr(expr <= 1, "indegree_" + itos(k));
+			}
+
+			// subtour elimination
+			for (i = 0; i < n - 1; i++)
+				for (j = 1; j < n; j++)
+				{
+					GRBLinExpr expr = 0.0;
+					expr += s[i] - s[j] + (n - 1) * x[i][j] + (n - 3) * x[j][i];
+					BPMPlp.addConstr(expr <= n - 2,
+									 "s_" + itos(i) + "_" + itos(j));
+				}
+
+			// arc flow
+			for (i = 0; i < n - 1; i++)
+				for (j = 1; j < n; j++)
+				{
+					GRBLinExpr expr = 0.0;
+					expr += wt[i][j] * y[i][j] - theta[i][j];
+					for (k = 0; k < n; k++)
+						expr += z[i][k][j] + z[k][j][i] - z[i][j][k];
+
+					BPMPlp.addConstr(expr == 0,
+									 "flow_" + itos(i) + "_" + itos(j));
+				}
+
+			// arc flow upperbound
+			for (i = 0; i < n - 1; i++)
+				for (j = 1; j < n; j++)
+				{
+					GRBLinExpr expr = 0.0;
+					expr += theta[i][j] - capacity * x[i][j];
+					BPMPlp.addConstr(expr <= 0,
+									 "flowBound_" + itos(i) + "_" + itos(j));
+				}
+
+			// set objective
+			GRBLinExpr obj = 0.0;
+			for (i = 0; i < n - 1; i++)
+				for (j = 1; j < n; j++)
+				{
+					obj += price * dis_v[i][j] * wt[i][j] * y[i][j];
+					obj -= cost * dis_v[i][j] * theta[i][j];
+					obj -= cost * vw * dis_v[i][j] * x[i][j];
+				}
+			BPMPlp.setObjective(obj, GRB_MAXIMIZE);
+
+			// Silent Mode
+			// BPMPlp.getEnv().set(GRB_IntParam_OutputFlag, 0);
+			BPMPlp.optimize();
+
+			// Extract solution
+			if (BPMPlp.get(GRB_IntAttr_SolCount) > 0)
+			{
+				double **sol = new double *[n];
+
+				cout << "Selected requests: " << endl;
+				for (i = 0; i < n; i++)
+				{
+					sol[i] = BPMPlp.get(GRB_DoubleAttr_X, y[i], n);
+					for (j = 0; j < n; j++)
+						if (sol[i][j] > min_double)
+							printf("%d -- %d\n", i + 1, j + 1);
+				}
+
+				cout << "Selected arcs: " << endl;
+				for (i = 0; i < n; i++)
+				{
+					sol[i] = BPMPlp.get(GRB_DoubleAttr_X, x[i], n);
+					for (int j = 0; j < n; j++)
+						if (sol[i][j] > min_double)
+							printf("%d -- %d %lf\n", i + 1, j + 1, sol[i][j]);
+				}
+
+				int nextNode = -1;
+				for (j = 0; j < n; j++)
+				{
+					if (j != startingNode && sol[startingNode][j] > min_double)
+					{
+						nextNode = j;
+						break;
+					}
+				}
+				cout << "nextNode = " << nextNode << endl;
+				while (nextNode > 0)
+				{
+					cout << "------start a new route------" << endl;
+					double routeFlow = bigM;
+					double distance = 0;
+					int count = 1;
+					vector<int> oneRouteNodes;
+					oneRouteNodes.push_back(startingNode);
+					oneRouteNodes.push_back(nextNode);
+					if (sol[startingNode][nextNode] < routeFlow)
+						routeFlow = sol[startingNode][nextNode];
+
+					cout << "routeFlow=" << routeFlow << endl;
+					if (nextNode != endingNode)
+						findOneRouteFromCurrentNode(count, nextNode, oneRouteNodes, routeFlow, sol, n, startingNode, endingNode);
+					else
+						sol[startingNode][endingNode] -= routeFlow;
+
+					// check if there is cycle in this route first.
+					// if no cycle, add to selectedRoutesVec
+					//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+					// work here !!!!!!!!!!!!!!!!!!!!!!!!;
+
+					for (i = 0; i < oneRouteNodes.size() - 1; i++)
+						distance += dis_v[oneRouteNodes[i]][oneRouteNodes[i + 1]];
+
+					cout << "===> one found route:" << endl;
+					for (i = 0; i < oneRouteNodes.size(); i++)
+						cout << oneRouteNodes[i] << " ";
+					cout << endl;
+					cout << "route flow: " << routeFlow << endl;
+					cout << "distance: " << distance << endl;
+
+					//===> BE CAREFUL: ONLY ADD THE ROUTE WITHIN DISTANCE LIMIT
+					// SOME ROUTES MIGHT HAVE OVER LIMIT DISTANCE
+					// IF WE ADD IT TO MASTER PROBLEM, IT MIGHT CAUSE COLUMN GENERATION COVERGE POINT > LP OPTIMAL SOLUTION
+					if (distance <= disLimit)
+						selectedRoutesVec.push_back(oneRouteNodes);
+
+					// remove the route flow from sol[][]
+					for (i = 0; i < oneRouteNodes.size() - 1; i++)
+						sol[oneRouteNodes[i]][oneRouteNodes[i + 1]] -= routeFlow;
+
+					nextNode = -1;
+					for (j = 0; j < n; j++)
+					{
+						if (j != startingNode && sol[startingNode][j] > min_double)
+						{
+							nextNode = j;
+							break;
+						}
+					}
+				}
+				reportTime(beginTime, beginWallClock);
+
+				for (i = 0; i < n; i++)
+					delete[] sol[i];
+				delete[] sol;
+
+				double objValue = BPMPlp.get(GRB_DoubleAttr_ObjVal);
+				cout << "obj value: " << objValue << endl;
+
+				reportTime(beginTime, beginWallClock);
+			}
+
+			for (i = 0; i < n; i++)
+			{
+				delete[] x[i];
+				delete[] y[i];
+				for (int j = 0; j < n; j++)
+					delete[] z[i][j];
+				delete[] z[i];
+			}
+			delete[] x;
+			delete[] y;
+			delete[] z;
+
+			BPMPlp.reset();
 		}
 		else
 		{
-			newCol[0][n - 1] = 1;
+			// newCol[0][n - 1] = 1;
+			vector<int> oneRouteNodes;
+			oneRouteNodes.push_back(startingNode);
+			oneRouteNodes.push_back(endingNode);
+			selectedRoutesVec.push_back(oneRouteNodes);
 		}
 		//======> end of initial route selection <======
-
-		if (PRINT_FOR_DEBUG)
-		{
-			cout << "=> initial patterns: \n";
-			for (i = 0; i < n; i++)
-			{
-				for (j = 0; j < n; j++)
-					cout << newCol[i][j] << "  ";
-				cout << "" << endl;
-			}
-		}
-
-		env = new GRBEnv();
 
 		GRBModel Master = GRBModel(*env);
 
 		// Turn off presolve
-		Master.set(GRB_IntParam_Presolve, 0);
+		// Master.set(GRB_IntParam_Presolve, 0);
 		// Silent Mode
 		Master.getEnv().set(GRB_IntParam_OutputFlag, 0);
 
 		//****** Variables of master problem
 		//*** set up var lambda
 		vector<GRBVar> lambda;
-		lambda.push_back(
-			Master.addVar(0.0, GRB_INFINITY, 0.0, GRB_CONTINUOUS,
-						  "lambda_" + itos(0)));
-		if (PRINT_FOR_DEBUG)
-			cout << "variable lambda is added \n";
+		// lambda.push_back(
+		// 	Master.addVar(0.0, GRB_INFINITY, 0.0, GRB_CONTINUOUS,
+		// 				  "lambda_" + itos(0)));
+		// if (PRINT_FOR_DEBUG)
+		// 	cout << "variable lambda is added \n";
 
 		//*** set up var y and triples variable z
 		GRBVar **y = nullptr;
@@ -493,7 +822,7 @@ int main(int argc, char *argv[])
 				for (k = 0; k < n; k++)
 					expr += z[i][k][j] + z[k][j][i] - z[i][j][k];
 
-				expr -= capacity * newCol[i][j] * lambda[0];
+				// expr -= capacity * newCol[i][j] * lambda[0];
 
 				arcFlowCapacity[i][j] = Master.addConstr(
 					expr <= 0, "arcFlowCap_" + itos(i) + "_" + itos(j));
@@ -501,11 +830,8 @@ int main(int argc, char *argv[])
 
 		GRBConstr *lambdaSum = new GRBConstr[1];
 		GRBLinExpr expr = 0.0;
-		expr += lambda[0];
+		// expr += lambda[0];
 		lambdaSum[0] = Master.addConstr(expr == 1, "lambdaSum");
-
-		if (PRINT_FOR_DEBUG)
-			cout << "constraints added! \n";
 
 		// set objective
 		GRBLinExpr obj = 0.0;
@@ -513,7 +839,7 @@ int main(int argc, char *argv[])
 			for (j = 1; j < n; j++)
 			{
 				obj += (price - cost) * dis_v[i][j] * wt[i][j] * y[i][j];
-				obj -= cost * vw * dis_v[i][j] * newCol[i][j] * lambda[0];
+				// obj -= cost * vw * dis_v[i][j] * newCol[i][j] * lambda[0];
 			}
 
 		for (i = 0; i < n; i++)
@@ -522,6 +848,53 @@ int main(int argc, char *argv[])
 					obj -= (dis_v[i][k] + dis_v[k][j] - dis_v[i][j]) * z[i][j][k];
 
 		Master.setObjective(obj, GRB_MAXIMIZE);
+
+		//===> add pre-selected routes from 1 GA, 2 BPMP LP, 3 startingNode->endingNode to the master problem's constraints and obj
+		{
+			int count = 1;
+			for (auto &selectedRoute : selectedRoutesVec)
+			{
+				if (selectedRoute.size() > 1)
+				{
+					// if (PRINT_FOR_DEBUG)
+					{
+						cout << "======> selected reoute" << endl;
+						for (i = 0; i < selectedRoute.size() - 1; i++)
+							cout << selectedRoute[i] << "->" << selectedRoute[i + 1] << ", ";
+						cout << endl;
+					}
+
+					// cout << "======> add initial routes from BPMP LP to master model" << endl;
+
+					GRBColumn col;
+
+					for (i = 0; i < selectedRoute.size() - 1; i++)
+						col.addTerm(-capacity, arcFlowCapacity[selectedRoute[i]][selectedRoute[i + 1]]);
+
+					// make a new column in lamdaSum constraint
+					col.addTerm(1, lambdaSum[0]);
+
+					// add the new column into model
+					double newLambdaCoeff = 0;
+
+					for (i = 0; i < selectedRoute.size() - 1; i++)
+						newLambdaCoeff -= cost * vw * dis_v[selectedRoute[i]][selectedRoute[i + 1]];
+
+					cout << "newLambdaCoeff=" << newLambdaCoeff << endl;
+
+					lambda.push_back(
+						Master.addVar(0.0, GRB_INFINITY, newLambdaCoeff, GRB_CONTINUOUS, col, "lambda_itr" + itos(0) + "_" + itos(count)));
+					count++;
+				}
+				else
+				{
+					printf("ERROR: after dominance method, there are at least two nodes in selected route!\n");
+					exit(1);
+				}
+			}
+		}
+		if (PRINT_FOR_DEBUG)
+			cout << "constraints added! \n";
 
 		int itrNum = 1;
 
@@ -551,6 +924,36 @@ int main(int argc, char *argv[])
 
 			double objValue_master = Master.get(GRB_DoubleAttr_ObjVal);
 			cout << "objective of Master problem: " << objValue_master << "\n";
+
+			// Extract solution and create new column
+			double **solTemp = new double *[n];
+			for (i = 0; i < n; i++)
+				solTemp[i] = new double[n];
+			for (i = 0; i < n; i++)
+			{
+				solTemp[i] = Master.get(GRB_DoubleAttr_X, y[i], n);
+				for (j = 0; j < n; j++)
+				{
+					if (solTemp[i][j] > min_double)
+					{
+						cout << "y[" << i << "," << j << "]=" << solTemp[i][j] << ", ";
+						cout << "w = " << wt[i][j] << ", ";
+						cout << "wy=" << wt[i][j] * solTemp[i][j] << endl;
+					}
+
+					for (int k = 0; k < n; k++)
+					{
+						if (z[i][j][k].get(GRB_DoubleAttr_X) > min_double)
+							cout << "z_" << i << " " << j << " " << k << " = " << z[i][j][k].get(GRB_DoubleAttr_X);
+					}
+				}
+			}
+
+			for (i = 0; i < lambda.size(); i++)
+			{
+				double temp = lambda[i].get(GRB_DoubleAttr_X);
+				cout << "lambda" << i + 1 << "=" << temp << endl;
+			}
 
 			double pi[n][n];
 
@@ -590,62 +993,21 @@ int main(int argc, char *argv[])
 			if (PRINT_FOR_DEBUG)
 				cout << "pi_lambda dual " << pi_lambda_sum << endl;
 
-			if (testOneRouteObjAndDist)
-			{
-				if (itrNum > 13)
-					exit(1);
-				if (itrNum == 13)
-				{
-					printf("xCoeff(0,1)=%lf\n", xCoeff[0][1]);
-					printf("xCoeff(1,4)=%lf\n", xCoeff[1][4]);
-					printf("xCoeffv(4,9)=%lf\n", xCoeff[4][9]);
-					printf("xCoeff(0,7)=%lf\n", xCoeff[0][7]);
-					printf("xCoeff(7,1)=%lf\n", xCoeff[7][1]);
-					printf("d(0,1)=%lf\n", dis_v[0][1]);
-					printf("d(1,4)=%lf\n", dis_v[1][4]);
-					printf("d(4,9)=%lf\n", dis_v[4][9]);
-					printf("d(0,7)=%lf\n", dis_v[0][7]);
-					printf("d(7,1)=%lf\n", dis_v[7][1]);
-
-					// cout << "pi_lambda dual " << pi_lambda_sum << endl;
-					//===> print coefficients of x variables
-					printf("{{%lf,", xCoeff[0][0]);
-					for (int j = 1; j < n - 1; j++)
-						printf("%lf,", xCoeff[0][j]);
-					printf("%lf},\n", xCoeff[0][n - 1]);
-					for (int i = 1; i < n - 1; i++)
-					{
-						printf("{%lf,", xCoeff[i][0]);
-						for (int j = 1; j < n - 1; j++)
-							printf("%lf,", xCoeff[i][j]);
-						printf("%lf},\n", xCoeff[i][n - 1]);
-					}
-					printf("{%lf,", xCoeff[n - 1][0]);
-					for (int j = 1; j < n - 1; j++)
-						printf("%lf,", xCoeff[n - 1][j]);
-					printf("%lf}};\n", xCoeff[n - 1][n - 1]);
-					//===> end of printing coeff
-				}
-			}
-
 			//================> Pricing Problem <================
-			// double objValue_PP;
 			vector<double> objValue_PP_vec; // stores the objValue of each route, the cost is asending, such as, objValue_PP[0]=-1.9, objValue_PP[1] =-1.6, objValue_PP[2]=-1.2...
 
-			// if (USE_DOMINACE_METHOD_FOR_SUB_PROBLEM)
 			if (pricingMethod == "dominance")
 			{
 				//===> !!!!!! selectedRoute index starts from 0 !!!!!!
 				//===> for example, selectedRoute[0]=0, selectedRoute[1]=6, selectedRoute[2]=9
 				//===> it means the route is 1->7->10
 				// return the cost of the selected Route !!!
-				// vector<int> selectedRoute;
-				vector<vector<int>> selectedRoutes_vec;
+				vector<vector<int>> selectedRoutesVec;
 
 				// runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute, startingNode, endingNode, nodeNeighbors);
 				// runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute, startingNode, endingNode);
 				// right now these arguments is only for dominance_inab_faster2.h. for other dominance variants, use the above function
-				runDominance(n, dis_v, xCoeff, disLimit, objValue_PP_vec, selectedRoutes_vec, returnFirstFoundGoodRoutes, maxNumNegativeRoutes, startingNode, endingNode);
+				runDominance(n, dis_v, xCoeff, disLimit, objValue_PP_vec, selectedRoutesVec, returnFirstFoundGoodRoutes, maxNumNegativeRoutes, startingNode, endingNode);
 
 				if (objValue_PP_vec.size() == 0)
 				{
@@ -667,7 +1029,8 @@ int main(int argc, char *argv[])
 				printf("best found objective of Pricing problem (dominace): %lf\n", objValue_PP_vec[0]);
 
 				solNew.clear();
-				for (auto &selectedRoute : selectedRoutes_vec)
+				for (auto &selectedRoute : selectedRoutesVec)
+				{
 					if (selectedRoute.size() > 1)
 					{
 						findSolutionInThisIteration = true;
@@ -692,6 +1055,7 @@ int main(int argc, char *argv[])
 						printf("ERROR: after dominance method, there are at least two nodes in selected route!\n");
 						exit(1);
 					}
+				}
 			}
 			// else
 			// right now Gurobi returns only 1 route
@@ -1062,4 +1426,45 @@ set<vector<int>> findTriangelInequalityViolation(double **dis_v, int n)
 				}
 			}
 	return TIV;
+}
+
+void findOneRouteFromCurrentNode(int &count, int currentNode, vector<int> &oneRouteNodes, double &routeFlow, double **sol, int n, int startingNode, int endingNode)
+{
+	cout << "--- count " << count << "---" << endl;
+	cout << "currentNode=" << currentNode << endl;
+	int nextNode;
+	bool findNextNode = false;
+	for (int j = 0; j < n; j++)
+	{
+		if (j != startingNode && sol[currentNode][j] > min_double)
+		{
+			nextNode = j;
+			findNextNode = true;
+			count++;
+			break;
+		}
+	}
+
+	if (findNextNode == false)
+	{
+		cout << "ERROR: can't find next node in BPMP LP solution route construction." << endl;
+		exit(1);
+	}
+	oneRouteNodes.push_back(nextNode);
+	if (sol[currentNode][nextNode] < routeFlow)
+		routeFlow = sol[currentNode][nextNode];
+
+	cout << "nextNode=" << nextNode << endl;
+	cout << "routeFlow=" << routeFlow << endl;
+
+	if (count > 100)
+	{
+		cout << "ERROR: repeat too many times in findOneRouteFromCurrentNode() function" << endl;
+		exit(1);
+	}
+
+	if (nextNode == endingNode)
+		return;
+	else
+		findOneRouteFromCurrentNode(count, nextNode, oneRouteNodes, routeFlow, sol, n, startingNode, endingNode);
 }
