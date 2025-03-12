@@ -30,6 +30,7 @@
 // #include "dominance_inab.h"
 // #include "dominance_inab_faster.h"
 #include "dominance_inab_faster2.h"
+#include "pulse.h"
 
 // #include "dominance_inab_shortlabel.h"
 
@@ -87,17 +88,17 @@ int main(int argc, char *argv[])
 	bool ADD_PREPROCESS = true;
 
 	//===> for dominance method solving pricing problem
-	// if it is true, finish dominance process when the first maxNumNegativeRoutes are found
-	// if it is false, then return at most maxNumNegativeRoutes good routes after dominance method is completed
-	bool returnFirstFoundGoodRoutes = false;
-	int maxNumNegativeRoutes = 2;
+	// if it is true, finish dominance process when the first maxNumNegativeRoutesInDominance are found
+	// if it is false, then return at most maxNumNegativeRoutesInDominance good routes after dominance method is completed
+	bool returnFirstFoundGoodRoutesInDominance = false;
+	int maxNumNegativeRoutesInDominance = 2;
 
 	//********* only read graph info and vehicle info by arguments
 	//********* doesn't go through the graph info in the data folder
 	if (argc != 5)
 	{
 		cout
-			<< "Usage: ./bpmp_dw-cg.x nodesDataNameAndPath numberOfVehicles vehicleDataNameAndPath pricingMethod(dominance or gurobi)"
+			<< "Usage: ./bpmp_dw-cg.x nodesDataNameAndPath numberOfVehicles vehicleDataNameAndPath pricingMethod(dominance or gurobi, or pulse)"
 			<< endl;
 		return 1;
 	}
@@ -109,7 +110,7 @@ int main(int argc, char *argv[])
 		cout << "Vehicles Data: " << argv[3] << endl;
 		numV = stoi(argv[2]);
 		pricingMethod = argv[4];
-		if (pricingMethod != "dominance" && pricingMethod != "gurobi")
+		if (pricingMethod != "dominance" && pricingMethod != "gurobi" && pricingMethod != "pulse")
 		{
 			cout << "ERROR: pricingMethod should be one of them: dominance, gurobi" << endl;
 			exit(1);
@@ -632,7 +633,6 @@ int main(int argc, char *argv[])
 			// double objValue_PP;
 			vector<double> objValue_PP_vec; // stores the objValue of each route, the cost is asending, such as, objValue_PP[0]=-1.9, objValue_PP[1] =-1.6, objValue_PP[2]=-1.2...
 
-			// if (USE_DOMINACE_METHOD_FOR_SUB_PROBLEM)
 			if (pricingMethod == "dominance")
 			{
 				//===> !!!!!! selectedRoute index starts from 0 !!!!!!
@@ -645,7 +645,7 @@ int main(int argc, char *argv[])
 				// runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute, startingNode, endingNode, nodeNeighbors);
 				// runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute, startingNode, endingNode);
 				// right now these arguments is only for dominance_inab_faster2.h. for other dominance variants, use the above function
-				runDominance(n, dis_v, xCoeff, disLimit, objValue_PP_vec, selectedRoutes_vec, returnFirstFoundGoodRoutes, maxNumNegativeRoutes, startingNode, endingNode);
+				runDominance(n, dis_v, xCoeff, disLimit, objValue_PP_vec, selectedRoutes_vec, returnFirstFoundGoodRoutesInDominance, maxNumNegativeRoutesInDominance, startingNode, endingNode);
 
 				if (objValue_PP_vec.size() == 0)
 				{
@@ -693,7 +693,7 @@ int main(int argc, char *argv[])
 						exit(1);
 					}
 			}
-			// else
+
 			// right now Gurobi returns only 1 route
 			else if (pricingMethod == "gurobi")
 			{
@@ -848,6 +848,7 @@ int main(int argc, char *argv[])
 				objValue_PP_vec.push_back(objValue_PP);
 				cout << "objective of PP problem (gurobi): " << objValue_PP << "\n";
 
+				solNew.clear();
 				if (PPmodel.get(GRB_IntAttr_SolCount) > 0)
 				{
 
@@ -874,6 +875,44 @@ int main(int argc, char *argv[])
 				delete[] x;
 				x = nullptr;
 			}
+			else if (pricingMethod == "pulse")
+			{
+
+				vector<int> selectedRoute;
+				double delta = 4;
+				pulseAlgorithm(n, dis_v, xCoeff, disLimit, selectedRoute, startingNode, endingNode, nodeNeighbors, delta);
+				// exit(1);
+				solNew.clear();
+				if (bestFoundRoutInPulse.size() > 1)
+				{
+					// if (PRINT_FOR_DEBUG)
+					{
+						cout << "selected reoute" << endl;
+						for (i = 0; i < bestFoundRoutInPulse.size() - 1; i++)
+							cout << bestFoundRoutInPulse[i] << "->" << bestFoundRoutInPulse[i + 1] << ", ";
+						cout << endl;
+					}
+
+					findSolutionInThisIteration = true;
+
+					vector<vector<double>> oneRouteSol(n, vector<double>(n, 0)); // initialize nxn matrix with 0
+					//===> assign value from returned route to sol array
+					for (i = 0; i < bestFoundRoutInPulse.size() - 1; i++)
+						oneRouteSol[bestFoundRoutInPulse[i]][bestFoundRoutInPulse[i + 1]] = 1;
+
+					solNew.push_back(oneRouteSol);
+
+					double objValue_PP = bestFoundObjInPulse;
+					objValue_PP += pi_lambda_sum;
+					objValue_PP = -objValue_PP;
+					objValue_PP_vec.push_back(objValue_PP);
+				}
+				else
+				{
+					printf("ERROR: after pulse method, there are at least two nodes in selected route!\n");
+					exit(1);
+				}
+			}
 
 			//======> AFTER SOLVING PRICING PROBLEM AND READ ROUTE INFO, ADD NEW VAR TO MASTER PROBLEM <======
 			double objValue_PP = objValue_PP_vec[0]; // the best obj found
@@ -889,7 +928,7 @@ int main(int argc, char *argv[])
 
 			if (findSolutionInThisIteration)
 			{
-				cout << "======> assigning routes to master model" << endl;
+				// cout << "======> assigning routes to master model" << endl;
 				int count = 1;
 				for (auto sol : solNew)
 				{
@@ -903,9 +942,9 @@ int main(int argc, char *argv[])
 								col.addTerm(-capacity, arcFlowCapacity[i][j]);
 								// unvisitedNodes.erase(i);
 							}
-					// if (PRINT_FOR_DEBUG)
+					if (PRINT_FOR_DEBUG)
 					{
-						printf("selected reoute: \n");
+						printf("selected route: \n");
 						for (i = 0; i < n; i++)
 							for (j = 0; j < n; j++)
 								if (sol[i][j] > 0.999 && sol[i][j] < 1.001)

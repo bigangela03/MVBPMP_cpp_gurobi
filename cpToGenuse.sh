@@ -26,3 +26,4 @@ scp dominance_inab_faster2.h ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
 %scp dominance_doubleB2D_vector.h ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
 %scp ga.h ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
 %scp BPMP_subtour-as-lazy.cpp ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
+scp pulse.h ydong@genuse62.smu.edu:~/mvbpmp-cpp-gurobi/
