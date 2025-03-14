@@ -91,7 +91,7 @@ int main(int argc, char *argv[])
 	// if it is true, finish dominance process when the first maxNumNegativeRoutesInDominance are found
 	// if it is false, then return at most maxNumNegativeRoutesInDominance good routes after dominance method is completed
 	bool returnFirstFoundGoodRoutesInDominance = false;
-	int maxNumNegativeRoutesInDominance = 2;
+	int maxNumNegativeRoutesInDominance = 1;
 
 	//********* only read graph info and vehicle info by arguments
 	//********* doesn't go through the graph info in the data folder
@@ -666,6 +666,16 @@ int main(int argc, char *argv[])
 
 				printf("best found objective of Pricing problem (dominace): %lf\n", objValue_PP_vec[0]);
 
+				// cout << "xcoeff: " << endl;
+				// 	for (auto &row : xCoeff)
+				// 	{
+				// 		for (auto &e : row)
+				// 			cout << e << " ";
+				// 		cout << endl;
+				// 	}
+				// 	cout << "objValue_PP_vec[0]: " << objValue_PP_vec[0] << endl;
+				// 	cout << "pi_lambda_sum: " << pi_lambda_sum << endl;
+
 				solNew.clear();
 				for (auto &selectedRoute : selectedRoutes_vec)
 					if (selectedRoute.size() > 1)
@@ -881,7 +891,6 @@ int main(int argc, char *argv[])
 				vector<int> selectedRoute;
 				double delta = 4;
 				pulseAlgorithm(n, dis_v, xCoeff, disLimit, selectedRoute, startingNode, endingNode, nodeNeighbors, delta);
-				// exit(1);
 				solNew.clear();
 				if (bestFoundRoutInPulse.size() > 1)
 				{
@@ -906,6 +915,17 @@ int main(int argc, char *argv[])
 					objValue_PP += pi_lambda_sum;
 					objValue_PP = -objValue_PP;
 					objValue_PP_vec.push_back(objValue_PP);
+					cout << "objective of PP problem (pulse): " << objValue_PP << "\n";
+
+					// cout << "xcoeff: " << endl;
+					// for (auto &row : xCoeff)
+					// {
+					// 	for (auto &e : row)
+					// 		cout << e << " ";
+					// 	cout << endl;
+					// }
+					// cout << "bestFoundObjInPulse: " << bestFoundObjInPulse << endl;
+					// cout << "pi_lambda_sum: " << pi_lambda_sum << endl;
 				}
 				else
 				{

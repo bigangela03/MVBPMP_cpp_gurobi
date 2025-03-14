@@ -177,15 +177,15 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
     {
         itrNum++;
 
-        if (PRINT_FOR_DEBUG)
-        {
-            cout << endl;
-            cout << "======> dominance iteration " << itrNum << " <======" << endl;
-            cout << "E_toBeTreatedNodesSet size = " << E_toBeTreatedNodesSet.size() << endl;
-            for (auto &temp : E_toBeTreatedNodesSet)
-                cout << temp << " ";
-            cout << endl;
-        }
+        // if (PRINT_FOR_DEBUG)
+        // {
+        //     cout << endl;
+        //     cout << "======> dominance iteration " << itrNum << " <======" << endl;
+        //     cout << "E_toBeTreatedNodesSet size = " << E_toBeTreatedNodesSet.size() << endl;
+        //     for (auto &temp : E_toBeTreatedNodesSet)
+        //         cout << temp << " ";
+        //     cout << endl;
+        // }
 
         // //===> only check the labels newly added in the last iteration
         // vector<vector<vector<double>>> labelsAddedInLastIteration(newLabelSet);
@@ -208,8 +208,8 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
             if (node == n - 1)
                 continue;
 
-            if (PRINT_FOR_DEBUG)
-                cout << "\n===> treaing node " << node << " in iteration " << itrNum << endl;
+            // if (PRINT_FOR_DEBUG)
+            //     cout << "\n===> treaing node " << node << " in iteration " << itrNum << endl;
 
             // for (auto &succ : nodeNeighbors[node]) //using nodeNeighbors slow down the running compared with succ=0 to n-1
             for (int succ = 0; succ < n; succ++) //===> LINE 10 in ESPPRC(p)
@@ -218,12 +218,12 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                 // if (succ == startingNode || succ == node)
                 //     continue;
 
-                if (PRINT_FOR_DEBUG)
-                {
-                    cout << "\nsucc=" << succ << " (itr " << itrNum << ", node " << node << ")" << endl;
-                    cout << "===> bigLambda_allNodesLableSet[" << node << "].size =" << bigLambda_allNodesLableSet[node].size() << endl;
-                    printLabelSet(bigLambda_allNodesLableSet[node], bigM);
-                }
+                // if (PRINT_FOR_DEBUG)
+                // {
+                //     cout << "\nsucc=" << succ << " (itr " << itrNum << ", node " << node << ")" << endl;
+                //     cout << "===> bigLambda_allNodesLableSet[" << node << "].size =" << bigLambda_allNodesLableSet[node].size() << endl;
+                //     printLabelSet(bigLambda_allNodesLableSet[node], bigM);
+                // }
 
                 // vector<vector<double>> F_nodeSuccLabelSet; //===> LINE 11 in ESPPRC(p) PSEUDO-CODE
 
@@ -236,12 +236,12 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
 
                     if (label[succ] == 0) //===> LINE 13 in ESPPRC(p) PSEUDO-CODE
                     {
-                        if (PRINT_FOR_DEBUG)
-                        {
-                            cout << "number of labels added in the last iteration = " << numNewlyAddedInLastIteration[node] << endl;
-                            cout << "find a label not visit succ yet" << endl;
-                            printOneLabel(label, bigM);
-                        }
+                        // if (PRINT_FOR_DEBUG)
+                        // {
+                        //     cout << "number of labels added in the last iteration = " << numNewlyAddedInLastIteration[node] << endl;
+                        //     cout << "find a label not visit succ yet" << endl;
+                        //     printOneLabel(label, bigM);
+                        // }
 
                         //===> LINE 14 in ESPPRC(p) PSEUDO-CODE
 
@@ -267,13 +267,13 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                                     // check if new label is dominated; if dominated, break;
                                     if (distTemp >= (*oldLabelIt)[n + 1] && costTemp >= (*oldLabelIt)[n + 2])
                                     {
-                                        if (PRINT_FOR_DEBUG)
-                                        {
-                                            cout << "new label: ";
-                                            printOneLabel(label, bigM);
-                                            cout << "old label: ";
-                                            printOneLabel(*oldLabelIt, bigM);
-                                        }
+                                        // if (PRINT_FOR_DEBUG)
+                                        // {
+                                        //     cout << "new label: ";
+                                        //     printOneLabel(label, bigM);
+                                        //     cout << "old label: ";
+                                        //     printOneLabel(*oldLabelIt, bigM);
+                                        // }
 
                                         long result = (B2DinabTempLong | (long)(*oldLabelIt)[n + 3]);
                                         if (result == B2DinabTempLong) // new label is dominated
@@ -307,8 +307,8 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
 
                                             oldLabelIt = bigLambda_allNodesLableSet[succ].erase(oldLabelIt);
 
-                                            if (PRINT_FOR_DEBUG)
-                                                cout << "new label is dominated" << endl;
+                                            // if (PRINT_FOR_DEBUG)
+                                            //     cout << "new label is dominated" << endl;
                                         }
                                         else
                                             ++oldLabelIt;
@@ -337,15 +337,15 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                                 bigLambda_allNodesLableSet[succ].push_back(labelTemp);
                                 numNewlyAddedLabels[succ] += 1;
 
-                                if (PRINT_FOR_DEBUG)
-                                {
-                                    cout << "visited number of nodes: labelTemp[n]=" << labelTemp[n] << endl;
-                                    cout << "traveled distance: labelTemp[n + 1]=" << labelTemp[n + 1] << endl;
+                                // if (PRINT_FOR_DEBUG)
+                                // {
+                                //     cout << "visited number of nodes: labelTemp[n]=" << labelTemp[n] << endl;
+                                //     cout << "traveled distance: labelTemp[n + 1]=" << labelTemp[n + 1] << endl;
 
-                                    // cout << "# of labels in F set: " << F_nodeSuccLabelSet.size() << endl;
-                                    // cout << "-> F set" << endl;
-                                    // printLabelSet(F_nodeSuccLabelSet, bigM);
-                                }
+                                //     // cout << "# of labels in F set: " << F_nodeSuccLabelSet.size() << endl;
+                                //     // cout << "-> F set" << endl;
+                                //     // printLabelSet(F_nodeSuccLabelSet, bigM);
+                                // }
                             }
                         }
                         else
@@ -367,9 +367,8 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                             //      label[n + 4] += newB2Dtemp;
                             //  }
 
-                            if (PRINT_FOR_DEBUG)
-                                cout
-                                    << "distance is over limit" << endl;
+                            // if (PRINT_FOR_DEBUG)
+                            //     cout << "distance is over limit" << endl;
                             // labelsOverDistLimit.push_back(label);
                         }
                     }
@@ -385,12 +384,12 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                     // EFF() step (4): remove dominated labels from old and updated new-label-set
                     //===> step (1) (2) and (3) are combined as procedures below}
 
-                    if (PRINT_FOR_DEBUG)
-                    {
-                        cout << "# of labels at succ node: " << bigLambda_allNodesLableSet[succ].size() << endl;
-                        cout << "-> labels after update succ=" << succ << " labels" << endl;
-                        printLabelSet(bigLambda_allNodesLableSet[succ], bigM);
-                    }
+                    // if (PRINT_FOR_DEBUG)
+                    // {
+                    //     cout << "# of labels at succ node: " << bigLambda_allNodesLableSet[succ].size() << endl;
+                    //     cout << "-> labels after update succ=" << succ << " labels" << endl;
+                    //     printLabelSet(bigLambda_allNodesLableSet[succ], bigM);
+                    // }
 
                     // //===> step (4)
                     // //===> remove the dominated labels for current and succsor nodes
@@ -417,8 +416,8 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
             if (numNewlyAddedLabels[i] > 0) //===> LINE 16 in ESPPRC(p) PSEUDO-CODE//===> LINE 16 in ESPPRC(p) PSEUDO-CODE
             {
                 E_toBeTreatedNodesSet.insert(i); //===> LINE 17 in ESPPRC(p) PSEUDO-CODE
-                if (PRINT_FOR_DEBUG)
-                    printf("node=%d is added int set E\n", i);
+                // if (PRINT_FOR_DEBUG)
+                //     printf("node=%d is added int set E\n", i);
             }
 
         for (int i = 0; i < n; i++)
@@ -442,11 +441,11 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
         }
     }
 
-    if (PRINT_FOR_DEBUG)
-    {
-        printf("\n-> the found visited nodes in label\n");
-        printLabelSet(bigLambda_allNodesLableSet[n - 1], bigM);
-    }
+    // if (PRINT_FOR_DEBUG)
+    // {
+    //     printf("\n-> the found visited nodes in label\n");
+    //     printLabelSet(bigLambda_allNodesLableSet[n - 1], bigM);
+    // }
 
     // ===> when RETRURN_WHEN_GIVEN_NUM_NEGATIVE_PATH_FOUND = false
     // most negative cost route is found after completing the whole labeling process
@@ -473,13 +472,13 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
             }
         }
 
-        if (PRINT_FOR_DEBUG)
-        {
-            cout << "best label:" << endl;
-            for (auto &ele : bestLabel)
-                cout << ele << " ";
-            cout << endl;
-        }
+        // if (PRINT_FOR_DEBUG)
+        // {
+        //     cout << "best label:" << endl;
+        //     for (auto &ele : bestLabel)
+        //         cout << ele << " ";
+        //     cout << endl;
+        // }
 
         obj.push_back(minCost);
 
@@ -508,25 +507,25 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
             printf("the right result is supposed to be label=[1,bigM,2,3, #,dis,cost]\n");
             exit(1);
         }
-        if (PRINT_FOR_DEBUG)
-        {
-            cout << "selected route before removing 0s:" << endl;
-            for (auto &ele : routeTemp)
-                cout << ele << " ";
-            cout << endl;
+        // if (PRINT_FOR_DEBUG)
+        // {
+        //     cout << "selected route before removing 0s:" << endl;
+        //     for (auto &ele : routeTemp)
+        //         cout << ele << " ";
+        //     cout << endl;
 
-            cout << "# of visited nodes: " << numAllVistedNodes << endl;
-        }
+        //     cout << "# of visited nodes: " << numAllVistedNodes << endl;
+        // }
 
         routeTemp.erase(routeTemp.begin() + (int)numAllVistedNodes, routeTemp.begin() + n);
 
-        if (PRINT_FOR_DEBUG)
-        {
-            cout << "selected route after removing 0s:" << endl;
-            for (auto &ele : routeTemp)
-                cout << ele << " ";
-            cout << endl;
-        }
+        // if (PRINT_FOR_DEBUG)
+        // {
+        //     cout << "selected route after removing 0s:" << endl;
+        //     for (auto &ele : routeTemp)
+        //         cout << ele << " ";
+        //     cout << endl;
+        // }
         obj.push_back(bestLabel[n + 2]);
 
         nodesOnRoute.push_back(routeTemp);
@@ -576,13 +575,13 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
             }
         }
 
-        if (PRINT_FOR_DEBUG)
-        {
-            cout << "best labels:" << endl;
-            for (int i = 0; i < bestLabelsTemp.size(); i++)
-                printOneLabel(bestLabelsTemp[i], bigM);
-            cout << endl;
-        }
+        // if (PRINT_FOR_DEBUG)
+        // {
+        //     cout << "best labels:" << endl;
+        //     for (int i = 0; i < bestLabelsTemp.size(); i++)
+        //         printOneLabel(bestLabelsTemp[i], bigM);
+        //     cout << endl;
+        // }
 
         //===> convert labels from found best lables to routes
         for (int i = 0; i < bestLabelsTemp.size(); i++)
@@ -614,24 +613,24 @@ void runDominance(int n, double **dis, vector<vector<double>> xCoeff, double dis
                 printf("the right result is supposed to be label=[1,bigM,2,3, #,dis,cost]\n");
                 exit(1);
             }
-            if (PRINT_FOR_DEBUG)
-            {
-                cout << "selected route before removing 0s:" << endl;
-                for (auto &ele : routeTemp)
-                    cout << ele << " ";
-                cout << endl;
+            // if (PRINT_FOR_DEBUG)
+            // {
+            //     cout << "selected route before removing 0s:" << endl;
+            //     for (auto &ele : routeTemp)
+            //         cout << ele << " ";
+            //     cout << endl;
 
-                cout << "# of visited nodes: " << numAllVistedNodes << endl;
-            }
+            //     cout << "# of visited nodes: " << numAllVistedNodes << endl;
+            // }
 
             routeTemp.erase(routeTemp.begin() + (int)numAllVistedNodes, routeTemp.begin() + n);
-            if (PRINT_FOR_DEBUG)
-            {
-                cout << "selected route after removing 0s:" << endl;
-                for (auto &ele : routeTemp)
-                    cout << ele << " ";
-                cout << endl;
-            }
+            // if (PRINT_FOR_DEBUG)
+            // {
+            //     cout << "selected route after removing 0s:" << endl;
+            //     for (auto &ele : routeTemp)
+            //         cout << ele << " ";
+            //     cout << endl;
+            // }
 
             obj.push_back(bestLabel[n + 2]);
 

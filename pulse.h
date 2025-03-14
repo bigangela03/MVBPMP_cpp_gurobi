@@ -60,152 +60,116 @@ void pulseAlgorithm(int n, double **dis, vector<vector<double>> xCoeff, double d
 
     numBoundingSections = floor((disLimit - minDistForCheckingBounds) / delta);
 
+    if (numBoundingSections < 1)
+    {
+        cout << "ERROR: in pulse, numBoundingSections is at lease one!";
+        exit(1);
+    }
+
     BsectionIndexLowerDist = new double[numBoundingSections];
     for (int i = 0; i < numBoundingSections; i++)
         BsectionIndexLowerDist[i] = disLimit - (numBoundingSections - i) * delta;
 
-    if (PRINT_FOR_DEBUG_PULSE)
-    {
-        cout << "numBoundingSections=" << numBoundingSections << endl;
-        for (int i = 0; i < numBoundingSections; i++)
-            cout << BsectionIndexLowerDist[i] << endl;
-    }
+    // if (PRINT_FOR_DEBUG_PULSE)
+    // {
+    //     cout << "Pulse algorithm: numBoundingSections=" << numBoundingSections << endl;
+    //     for (int i = 0; i < numBoundingSections; i++)
+    //         cout << BsectionIndexLowerDist[i] << endl;
+    // }
+
     // generate a numBoundingSections rows, n columns matrix B.
     // B[1][2]=-2.3 means node distance section 1, for node 2 (node index starts from 0)
     //                    node 0, node 1, node 2,..., node n-1
     // 0 (dist>=10, <15)   -3.5    -1.8    ...
     // 1 (dist>=15, <20)     ..     ..     -2.3
+
+    // right now B matrix has no value assigned. And this procedure is to find value for B.
+    // But pulse use B value, so we have to initialize B with some value. Use -bigM, so no route will be pruned because of Bound check
+
     B = new double *[numBoundingSections];
     for (int i = 0; i < numBoundingSections; i++)
         B[i] = new double[n];
 
-    // bound(B, BsectionIndexLowerDist);
+    for (int i = 0; i < numBoundingSections; i++)
+        for (int j = 0; j < n; j++)
+            B[i][j] = -bigM;
 
     for (int i = 0; i < numBoundingSections; i++)
     {
         double currentDisforB = BsectionIndexLowerDist[i];
         for (int node = 0; node < n; node++)
         {
-            if (node == startNode || node == endNode)
-                continue;
+            // if (node == startNode || node == endNode)
+            //     continue;
+
             partialObj = 0;
             partialDist = currentDisforB;
-            onePartialPath.clear();
+            if (node == startNode)
+                partialDist = 0;
+
             bestFoundObjInPulse = bigM;
             bestFoundRoutInPulse.clear();
-            pulse(node, nodeNeighbors, partialObj, partialDist, dis, disLimit, onePartialPath, xCoeff, endNode);
+
+            onePartialPath.clear();
+            onePartialPath.push_back(node);
+            for (int neighbor : nodeNeighbors[node])
+                pulse(neighbor, nodeNeighbors, partialObj, partialDist, dis, disLimit, onePartialPath, xCoeff, endNode);
 
             B[i][node] = bestFoundObjInPulse; // if no route found, B[i][node]=bigM as bestFoundObjInPulse's initial value
         }
     }
+
+    // if (PRINT_FOR_DEBUG_PULSE)
+    // {
+    //     cout << "===> B matrix" << endl;
+    //     for (int i = 0; i < numBoundingSections; i++)
+    //     {
+    //         cout << BsectionIndexLowerDist[i] << ": ";
+    //         for (int j = 0; j < n; j++)
+    //             cout << B[i][j] << " ";
+    //         cout << endl;
+    //     }
+    // }
+
+    // pulse(startNode, nodeNeighbors, partialObj, partialDist, dis, disLimit, onePartialPath, xCoeff, endNode);
+    // cout << "===> start searching" << endl;
     partialObj = 0;
     partialDist = 0;
     onePartialPath.clear();
     bestFoundObjInPulse = bigM;
     bestFoundRoutInPulse.clear();
-
-    if (PRINT_FOR_DEBUG_PULSE)
-    {
-        cout << "===> B matrix" << endl;
-        for (int i = 0; i < numBoundingSections; i++)
-        {
-            cout << BsectionIndexLowerDist[i] << ": ";
-            for (int j = 0; j < n; j++)
-                cout << B[i][j] << " ";
-            // printf("%12lf ", B[i][j]);
-            cout << endl;
-        }
-    }
-    pulse(startNode, nodeNeighbors, partialObj, partialDist, dis, disLimit, onePartialPath, xCoeff, endNode);
+    onePartialPath.push_back(startNode);
+    for (int neighbor : nodeNeighbors[startNode])
+        pulse(neighbor, nodeNeighbors, partialObj, partialDist, dis, disLimit, onePartialPath, xCoeff, endNode);
 }
 
 void pulse(int currentNode, vector<vector<int>> &nodeNeighbors, double partialObj, double partialDist, double **dis,
            double disLimit, vector<int> onePartialPath, vector<vector<double>> &xCoeff, int endNode)
 {
-
-    int numNodes = onePartialPath.size();
-    int lastNode;
-
-    if (PRINT_FOR_DEBUG_PULSE)
-    {
-        cout << "------pulse------" << endl;
-        cout << "currentNode=" << currentNode << endl;
-        cout << "numNodes=" << numNodes << endl;
-    }
+    // cout << "currentNode=" << currentNode << "; partialObj=" << partialObj << "; partialDist=" << partialDist << endl;
 
     // check Feasibility
-    if (!onePartialPath.empty())
-    {
-        lastNode = onePartialPath[numNodes - 1];
+    // if (onePartialPath.empty())
+    // {
+    //     onePartialPath.push_back(currentNode);
+    //     for (int neighbor : nodeNeighbors[currentNode])
+    //         pulse(neighbor, nodeNeighbors, partialObj, partialDist, dis, disLimit, onePartialPath, xCoeff, endNode);
 
-        if (PRINT_FOR_DEBUG_PULSE)
-            cout << "lastNode=" << lastNode << endl;
+    //     return;
+    // }
 
-        if (partialDist + dis[lastNode][currentNode] > disLimit)
-        {
-            if (PRINT_FOR_DEBUG_PULSE)
-                cout << "===> distance is over limit. return." << endl;
-            return;
-        }
-    }
-    else
-    {
-        onePartialPath.push_back(currentNode);
-        for (int neighbor : nodeNeighbors[currentNode])
-        {
-            pulse(neighbor, nodeNeighbors, partialObj, partialDist, dis, disLimit, onePartialPath, xCoeff, endNode);
-        }
+    int numNodes = onePartialPath.size();
+    int lastNode = onePartialPath[numNodes - 1];
 
-        return;
-    }
-
-    // 2. check bound
-    for (int i = 0; i < numBoundingSections; i++)
-    {
-        // cout << "===> check bound i=" << i << "; dist=" << BsectionIndexLowerDist[i] << endl;
-        if (partialDist >= BsectionIndexLowerDist[i])
-        {
-            if (partialObj + B[i][lastNode] >= bestFoundObjInPulse)
-                return;
-            else
-                break;
-        }
-    }
-
-    // 3. rollback
-
-    if (numNodes >= 2)
-    {
-        int secondLastNode = onePartialPath[numNodes - 2];
-        if (PRINT_FOR_DEBUG_PULSE)
-            cout << "secondLastNode=" << secondLastNode << endl;
-
-        // if (find(nodeNeighbors[secondLastNode].begin(), nodeNeighbors[secondLastNode].end(), currentNode) != nodeNeighbors[secondLastNode].end())
-        {
-            // cost of route from node i(secondLastNode) directly to j (currentNode)
-            double directObj = partialObj - xCoeff[secondLastNode][lastNode] + xCoeff[secondLastNode][currentNode];
-
-            // cost of route from node i(secondLastNode) to k (lastNode) then j (currentNode)
-            double detourObj = partialObj + xCoeff[lastNode][currentNode];
-
-            if (directObj < detourObj)
-            {
-                if (PRINT_FOR_DEBUG_PULSE)
-                    cout << "===> rollback. return." << endl;
-                return;
-            }
-        }
-    }
-
-    onePartialPath.push_back(currentNode);
-    partialObj += xCoeff[lastNode][currentNode];
-    partialDist += dis[lastNode][currentNode];
+    double distTemp = partialDist + dis[lastNode][currentNode];
+    double objTemp = partialObj + xCoeff[lastNode][currentNode];
 
     if (currentNode == endNode)
     {
-        if (partialObj < bestFoundObjInPulse)
+        if (objTemp < bestFoundObjInPulse)
         {
-            bestFoundObjInPulse = partialObj;
+            bestFoundObjInPulse = objTemp;
+            onePartialPath.push_back(currentNode);
             bestFoundRoutInPulse = onePartialPath;
             if (PRINT_FOR_DEBUG_PULSE)
             {
@@ -215,15 +179,69 @@ void pulse(int currentNode, vector<vector<int>> &nodeNeighbors, double partialOb
                 cout << endl;
             }
         }
+        return;
     }
+
+    if (distTemp + dis[currentNode][endNode] > disLimit)
+    {
+        // if (PRINT_FOR_DEBUG_PULSE)
+        //     cout << "===> distance is over limit. return." << endl;
+        return;
+    }
+
+    // 2. check bound
+    // numBoundingSections is at lease one
+    if (distTemp >= BsectionIndexLowerDist[0])
+    {
+        if (distTemp >= BsectionIndexLowerDist[numBoundingSections - 1])
+        {
+            if (objTemp + B[numBoundingSections - 1][currentNode] >= bestFoundObjInPulse)
+                return;
+        }
+        else
+            for (int i = 1; i < numBoundingSections; i++)
+            {
+                if ((distTemp >= BsectionIndexLowerDist[i - 1]) && (distTemp < BsectionIndexLowerDist[i]))
+                {
+                    if (objTemp + B[i - 1][currentNode] >= bestFoundObjInPulse)
+                        return;
+                    else
+                        break;
+                }
+            }
+    }
+
+    // 3. rollback
+    if (numNodes >= 2)
+    {
+        int secondLastNode = onePartialPath[numNodes - 2];
+        // if (PRINT_FOR_DEBUG_PULSE)
+        //     cout << "secondLastNode=" << secondLastNode << endl;
+
+        // if (find(nodeNeighbors[secondLastNode].begin(), nodeNeighbors[secondLastNode].end(), currentNode) != nodeNeighbors[secondLastNode].end())
+        {
+            // cost of route from node i(secondLastNode) directly to j (currentNode)
+            double directObj = partialObj - xCoeff[secondLastNode][lastNode] + xCoeff[secondLastNode][currentNode];
+
+            if (directObj < objTemp)
+            {
+                // if (PRINT_FOR_DEBUG_PULSE)
+                //     cout << "===> rollback. return." << endl;
+                return;
+            }
+        }
+    }
+
+    onePartialPath.push_back(currentNode);
 
     for (int neighbor : nodeNeighbors[currentNode])
     {
+        // if neighbor is not in path
         if (find(onePartialPath.begin(), onePartialPath.end(), neighbor) == onePartialPath.end())
         {
-            if (PRINT_FOR_DEBUG_PULSE)
-                cout << "start checking node " << currentNode << "'s neighbor " << neighbor << endl;
-            pulse(neighbor, nodeNeighbors, partialObj, partialDist, dis, disLimit, onePartialPath, xCoeff, endNode);
+            // if (PRINT_FOR_DEBUG_PULSE)
+            //     cout << "start checking node " << currentNode << "'s neighbor " << neighbor << endl;
+            pulse(neighbor, nodeNeighbors, objTemp, distTemp, dis, disLimit, onePartialPath, xCoeff, endNode);
         }
     }
 }
