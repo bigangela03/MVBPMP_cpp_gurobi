@@ -1,6 +1,11 @@
 #ifndef PULSE_H
 #define PULSE_H
 
+// I tried adding unordered_set<int> partialaPathNodes to store the nodes on path,
+// so that in pulse() function, it takes O(1) to find if a node in on a route.
+// but when test on instance t40_10 dense data, it took 126 seconds to finish,
+// while not using unordered_set<int> only taks 43 seconds. So I dropped this feature
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h> //to get path to current directory
@@ -37,6 +42,7 @@ int numBoundingSections;
 double *BsectionIndexLowerDist;
 
 void pulse(int, vector<vector<int>> &, double, double, double **, double, vector<int>, vector<vector<double>> &, int);
+// void pulse(int, vector<vector<int>> &, double, double, double **, double, vector<int>, vector<vector<double>> &, int, unordered_set<int>);
 
 void pulseAlgorithm(int n, double **dis, vector<vector<double>> xCoeff, double disLimit, vector<int> &nodesOnRoute,
                     int startNode, int endNode, vector<vector<int>> nodeNeighbors, double delta)
@@ -44,9 +50,7 @@ void pulseAlgorithm(int n, double **dis, vector<vector<double>> xCoeff, double d
     int bigM = 1000000;
     double minDistForCheckingBounds = 8;
 
-    vector<vector<int>> pathsToEndNode;
-    vector<double> pathsObjToEndNode;
-    vector<double> pathsDistToEndNode;
+    // unordered_set<int> partialaPathNodes;
 
     vector<int> onePartialPath;
     double partialDist = 0;
@@ -110,26 +114,29 @@ void pulseAlgorithm(int n, double **dis, vector<vector<double>> xCoeff, double d
             bestFoundObjInPulse = bigM;
             bestFoundRoutInPulse.clear();
 
+            // partialaPathNodes.clear();
+            // partialaPathNodes.insert(node);
             onePartialPath.clear();
             onePartialPath.push_back(node);
             for (int neighbor : nodeNeighbors[node])
                 pulse(neighbor, nodeNeighbors, partialObj, partialDist, dis, disLimit, onePartialPath, xCoeff, endNode);
+            // pulse(neighbor, nodeNeighbors, partialObj, partialDist, dis, disLimit, onePartialPath, xCoeff, endNode, partialaPathNodes);
 
             B[i][node] = bestFoundObjInPulse; // if no route found, B[i][node]=bigM as bestFoundObjInPulse's initial value
         }
     }
 
-    // if (PRINT_FOR_DEBUG_PULSE)
-    // {
-    //     cout << "===> B matrix" << endl;
-    //     for (int i = 0; i < numBoundingSections; i++)
-    //     {
-    //         cout << BsectionIndexLowerDist[i] << ": ";
-    //         for (int j = 0; j < n; j++)
-    //             cout << B[i][j] << " ";
-    //         cout << endl;
-    //     }
-    // }
+    if (PRINT_FOR_DEBUG_PULSE)
+    {
+        cout << "===> B matrix" << endl;
+        for (int i = 0; i < numBoundingSections; i++)
+        {
+            cout << BsectionIndexLowerDist[i] << ": ";
+            for (int j = 0; j < n; j++)
+                cout << B[i][j] << " ";
+            cout << endl;
+        }
+    }
 
     // pulse(startNode, nodeNeighbors, partialObj, partialDist, dis, disLimit, onePartialPath, xCoeff, endNode);
     // cout << "===> start searching" << endl;
@@ -137,14 +144,19 @@ void pulseAlgorithm(int n, double **dis, vector<vector<double>> xCoeff, double d
     partialDist = 0;
     onePartialPath.clear();
     bestFoundObjInPulse = bigM;
+    // partialaPathNodes.clear();
+    // partialaPathNodes.insert(startNode);
     bestFoundRoutInPulse.clear();
     onePartialPath.push_back(startNode);
     for (int neighbor : nodeNeighbors[startNode])
         pulse(neighbor, nodeNeighbors, partialObj, partialDist, dis, disLimit, onePartialPath, xCoeff, endNode);
+    // pulse(neighbor, nodeNeighbors, partialObj, partialDist, dis, disLimit, onePartialPath, xCoeff, endNode, partialaPathNodes);
 }
 
 void pulse(int currentNode, vector<vector<int>> &nodeNeighbors, double partialObj, double partialDist, double **dis,
            double disLimit, vector<int> onePartialPath, vector<vector<double>> &xCoeff, int endNode)
+//    void pulse(int currentNode, vector<vector<int>> &nodeNeighbors, double partialObj, double partialDist, double **dis,
+// double disLimit, vector<int> onePartialPath, vector<vector<double>> &xCoeff, int endNode, unordered_set<int> partialaPathNodes)
 {
     // cout << "currentNode=" << currentNode << "; partialObj=" << partialObj << "; partialDist=" << partialDist << endl;
 
@@ -233,15 +245,18 @@ void pulse(int currentNode, vector<vector<int>> &nodeNeighbors, double partialOb
     }
 
     onePartialPath.push_back(currentNode);
+    // partialaPathNodes.insert(currentNode);
 
     for (int neighbor : nodeNeighbors[currentNode])
     {
         // if neighbor is not in path
         if (find(onePartialPath.begin(), onePartialPath.end(), neighbor) == onePartialPath.end())
+        // if (partialaPathNodes.find(neighbor) == partialaPathNodes.end())
         {
             // if (PRINT_FOR_DEBUG_PULSE)
             //     cout << "start checking node " << currentNode << "'s neighbor " << neighbor << endl;
             pulse(neighbor, nodeNeighbors, objTemp, distTemp, dis, disLimit, onePartialPath, xCoeff, endNode);
+            // pulse(neighbor, nodeNeighbors, objTemp, distTemp, dis, disLimit, onePartialPath, xCoeff, endNode, partialaPathNodes);
         }
     }
 }
