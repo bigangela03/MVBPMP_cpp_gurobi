@@ -184,21 +184,21 @@ int main(int argc, char *argv[])
 
 	//================> end of reading data <================
 
-	int startingNode = 0;
-	int endingNode = n - 1;
+	int startNode = 0;
+	int endNode = n - 1;
 
 	// check if there is demand associated with each node
 	bool findNonUsedNode = false;
 	for (int i = 0; i < n; i++)
 	{
 		double nodeDemand = 0;
-		if (i != startingNode && i != endingNode)
+		if (i != startNode && i != endNode)
 		{
 			for (int j = 0; j < n; j++)
 			{
-				if (j != startingNode)
+				if (j != startNode)
 					nodeDemand += wt[i][j];
-				if (j != endingNode)
+				if (j != endNode)
 					nodeDemand += wt[j][i];
 			}
 
@@ -250,7 +250,7 @@ int main(int argc, char *argv[])
 
 	//===> check if visiting some arcs over distance limit
 	vector<vector<double>> inaccessibleArcs;
-	vector<vector<int>> nodeNeighbors; // it is not used right now since it makes dominance run slower
+	vector<vector<int>> nodeNeighbors; // it is not used in dominance method right now since it makes dominance run slower, but it is used in pulse.
 	vector<vector<int>> nodeInaccNeighbors;
 	if (ADD_PREPROCESS)
 	{
@@ -258,10 +258,10 @@ int main(int argc, char *argv[])
 		for (int i = 0; i < n; i++)
 		{
 			vector<int> neighbors;
-			if (i != endingNode)
+			if (i != endNode)
 				for (int j = 0; j < n; j++)
 				{
-					if (j != startingNode)
+					if (j != startNode)
 						neighbors.push_back(j);
 				}
 			nodeNeighbors.push_back(neighbors);
@@ -277,9 +277,9 @@ int main(int argc, char *argv[])
 		for (int i = 0; i < n; i++)
 			for (int j = 0; j < n; j++)
 			{
-				if (i != startingNode && i != endingNode && j != endingNode && j != startingNode && i != j)
+				if (i != startNode && i != endNode && j != endNode && j != startNode && i != j)
 				{
-					double distTemp = dis_v[startingNode][i] + dis_v[i][j] + dis_v[j][endingNode];
+					double distTemp = dis_v[startNode][i] + dis_v[i][j] + dis_v[j][endNode];
 					if (distTemp > disLimit)
 					{
 						vector<double> arcTemp = {(double)i, (double)j, distTemp};
@@ -450,9 +450,10 @@ int main(int argc, char *argv[])
 		if (ADD_PREPROCESS)
 		{
 			for (int i = 0; i < n; i++)
-				for (j = 0; j < nodeInaccNeighbors[i].size(); j++)
+			{
+				vector<int> nbsTemp = nodeInaccNeighbors[i];
+				for (j = 0; j < nbsTemp.size(); j++)
 				{
-					vector<int> nbsTemp = nodeInaccNeighbors[i];
 					// in BPMP model, we also set x[i][nbsTemp[j]]=0, but in CG's master problem, there is no x variables.
 					// x is only in pricing problem.
 					y[i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
@@ -464,14 +465,15 @@ int main(int argc, char *argv[])
 						z[k][nbsTemp[j]][i].set(GRB_DoubleAttr_UB, 0);
 					}
 				}
+			}
 
 			int numViolatedTriples = 0;
 			for (int i = 0; i < n; i++)
-				if (i != startingNode && i != endingNode)
+				if (i != startNode && i != endNode)
 					for (auto &k : nodeNeighbors[i])
 						for (auto &j : nodeNeighbors[k])
 							if (i != j)
-								if (dis_v[startingNode][i] + dis_v[i][k] + dis_v[k][j] + dis_v[j][endingNode] > disLimit)
+								if (dis_v[startNode][i] + dis_v[i][k] + dis_v[k][j] + dis_v[j][endNode] > disLimit)
 								{
 									z[i][j][k].set(GRB_DoubleAttr_UB, 0);
 									numViolatedTriples++;
@@ -642,10 +644,10 @@ int main(int argc, char *argv[])
 				// vector<int> selectedRoute;
 				vector<vector<int>> selectedRoutes_vec;
 
-				// runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute, startingNode, endingNode, nodeNeighbors);
-				// runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute, startingNode, endingNode);
+				// runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute, startNode, endNode, nodeNeighbors);
+				// runDominance(n, dis_v, xCoeff, disLimit, &objValue_PP, selectedRoute, startNode, endNode);
 				// right now these arguments is only for dominance_inab_faster2.h. for other dominance variants, use the above function
-				runDominance(n, dis_v, xCoeff, disLimit, objValue_PP_vec, selectedRoutes_vec, returnFirstFoundGoodRoutesInDominance, maxNumNegativeRoutesInDominance, startingNode, endingNode);
+				runDominance(n, dis_v, xCoeff, disLimit, objValue_PP_vec, selectedRoutes_vec, returnFirstFoundGoodRoutesInDominance, maxNumNegativeRoutesInDominance, startNode, endNode);
 
 				if (objValue_PP_vec.size() == 0)
 				{
@@ -890,7 +892,7 @@ int main(int argc, char *argv[])
 
 				vector<int> selectedRoute;
 				double delta = 4;
-				pulseAlgorithm(n, dis_v, xCoeff, disLimit, selectedRoute, startingNode, endingNode, nodeNeighbors, delta);
+				pulseAlgorithm(n, dis_v, xCoeff, disLimit, selectedRoute, startNode, endNode, nodeNeighbors, delta);
 				solNew.clear();
 				if (bestFoundRoutInPulse.size() > 1)
 				{
