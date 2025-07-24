@@ -41,7 +41,7 @@ double INITIAL_U_COEFFICIENT;
 
 bool USE_UB_FROM_LR = false;
 // feed the LR solution to Gurobi and find the optimal solution
-bool DO_STAGE_TWO = true;
+bool DO_STAGE_TWO = false;
 
 bool PRINT_x_WHEN_INTEGER_SOL = false;
 bool PRINT_y_WHEN_INTEGER_SOL = false;
@@ -53,6 +53,9 @@ bool USE_LR_MULTIPLIER_TYPE_C = true;
 bool PRINT_VAR_VALUR = false;
 bool PRINT_CONFLICT_PICKUP = true;
 bool PRINT_LRmultiplierTypeB_update_process = false;
+
+bool ADD_PREPROCESS = true;
+bool ALL_VEHICLES_SAME_STARTNODE = false;
 
 double bigM = 10000000;
 
@@ -67,8 +70,7 @@ itos(int i)
 void updateLRmultiplierTypeC(double ***, double, double *, double **, double, double);
 void printVar(double ***, double ***, double ****, int *);
 void updateLRmultiplierTypeB(double ***, double **, double, int, int);
-void
-	reportTime(clock_t, auto);
+void reportTime(clock_t, auto);
 void storeBestLB(double ***, double ***, double ****, double **, double ***, double ***,
 				 double ****, double **);
 
@@ -274,6 +276,7 @@ int main(int argc, char *argv[])
 	double cost = route.travelCost;
 	double vw = route.vehicleWeight;
 	double Q = route.totalCapacity;
+	double disLimit = (double)route.DIS;
 
 	//==============reading vehicle info==============
 	string vehicleFileName = argv[3];
@@ -299,6 +302,96 @@ int main(int argc, char *argv[])
 		printf("%d ", origin[i]);
 	}
 	printf("\n");
+
+	//====== force every vehicle starts from the same node ======
+	if (ALL_VEHICLES_SAME_STARTNODE)
+	{
+		for (int i = 0; i < numV; i++)
+			origin[i] = 0;
+	}
+
+	//====== vehicles' depots are the same ======
+	// vehicles' startNode might be different, so the startNode will
+	// be defined for each vehicle in LR
+	int endNode = n - 1;
+
+	//============== add preprocess ==============
+	//===> check if visiting some arcs over distance limit
+
+	vector<vector<vector<int>>> allVehiclesInaccNeighbors;
+	vector<vector<vector<int>>> allVehiclesNodeNeighbors;
+
+	if (ADD_PREPROCESS)
+	{
+		for (int k = 0; k < numV; k++)
+		{
+			vector<vector<int>> nodeNeighbors;
+			vector<vector<int>> nodeInaccNeighbors;
+			int startNode = origin[k];
+
+			// initialize nodeNeighbors and nodeInaccNeighbors
+			for (int i = 0; i < n; i++)
+			{
+				vector<int> neighbors;
+				if (i != endNode)
+					for (int j = 0; j < n; j++)
+					{
+						if (j != startNode)
+							neighbors.push_back(j);
+					}
+				nodeNeighbors.push_back(neighbors);
+
+				vector<int> neighbors2;
+				nodeInaccNeighbors.push_back(neighbors2);
+			}
+
+			// find the arcs violate distance limit
+			for (int i = 0; i < n; i++)
+				for (int j = 0; j < n; j++)
+				{
+					if (i != startNode && i != endNode && j != endNode && j != startNode && i != j)
+					{
+						double distTemp = dis[startNode][i] + dis[i][j] + dis[j][endNode];
+						if (distTemp > disLimit)
+						{
+							// update nodeInaccNeighbors
+							nodeInaccNeighbors[i].push_back(j);
+
+							// update nodeNeighbors, remove j from neighbors
+							auto it = find(nodeNeighbors[i].begin(), nodeNeighbors[i].end(), j);
+							if (it != nodeNeighbors[i].end())
+								nodeNeighbors[i].erase(it);
+						}
+					}
+				}
+			allVehiclesInaccNeighbors.push_back(nodeInaccNeighbors);
+			allVehiclesNodeNeighbors.push_back(nodeNeighbors);
+		}
+
+		cout << "allVehiclesInaccNeighbors" << endl;
+		for (auto &oneVeh : allVehiclesInaccNeighbors)
+		{
+			cout << "vehicle " << endl;
+			for (auto &oneNodeNb : oneVeh)
+			{
+				for (auto &e : oneNodeNb)
+					cout << e << " ";
+				cout << endl;
+			}
+		}
+
+		cout << "allVehiclesNodeNeighbors" << endl;
+		for (auto &oneVeh : allVehiclesNodeNeighbors)
+		{
+			cout << "vehicle " << endl;
+			for (auto &oneNodeNb : oneVeh)
+			{
+				for (auto &e : oneNodeNb)
+					cout << e << " ";
+				cout << endl;
+			}
+		}
+	}
 
 	//============== start Lagrangian Relaxation ==============
 
@@ -423,7 +516,7 @@ int main(int argc, char *argv[])
 
 			// start calling Gurobi
 			int i, j, k;
-			int vehicleOrigin = origin[vehicleIndex];
+			int startNode = origin[vehicleIndex];
 
 			GRBEnv *env = NULL;
 			GRBVar **x = NULL;
@@ -446,13 +539,12 @@ int main(int argc, char *argv[])
 				GRBModel model = GRBModel(*env);
 
 				// set up logfile
-				model.set(
-					"LogFile",
-					"mvbpmp_" + itos(n) + "_" + itos(vehicleIndex) + ".log");
+				// model.set("LogFile", "mvbpmp_" + itos(n) + "_" + itos(vehicleIndex) + ".log");
 				// send the log to a file only
-				model.set(GRB_IntParam_LogToConsole, 0);
+				// model.set(GRB_IntParam_LogToConsole, 0);
 				// keep outputflag 1 to print out log
-				model.set(GRB_IntParam_OutputFlag, 1);
+				// model.set(GRB_IntParam_OutputFlag, 1);
+				model.set(GRB_IntParam_OutputFlag, 0);
 
 				// set the number of threads to required number of Threads
 				model.set(GRB_IntParam_Threads, NUM_THREADS_VEH);
@@ -486,8 +578,8 @@ int main(int argc, char *argv[])
 				{
 					x[i][i].set(GRB_DoubleAttr_UB, 0);
 					y[i][i].set(GRB_DoubleAttr_UB, 0);
-					x[i][vehicleOrigin].set(GRB_DoubleAttr_UB, 0);
-					y[i][vehicleOrigin].set(GRB_DoubleAttr_UB, 0);
+					x[i][startNode].set(GRB_DoubleAttr_UB, 0);
+					y[i][startNode].set(GRB_DoubleAttr_UB, 0);
 					x[n - 1][i].set(GRB_DoubleAttr_UB, 0);
 					y[n - 1][i].set(GRB_DoubleAttr_UB, 0);
 				}
@@ -496,16 +588,48 @@ int main(int argc, char *argv[])
 					for (j = 0; j < n; j++)
 					{
 						u[n - 1][i][j].set(GRB_DoubleAttr_UB, 0);
-						u[i][vehicleOrigin][j].set(GRB_DoubleAttr_UB, 0);
-						u[i][j][vehicleOrigin].set(GRB_DoubleAttr_UB, 0);
+						u[i][startNode][j].set(GRB_DoubleAttr_UB, 0);
+						u[i][j][startNode].set(GRB_DoubleAttr_UB, 0);
 						u[i][j][n - 1].set(GRB_DoubleAttr_UB, 0);
 					}
+
+				if (ADD_PREPROCESS)
+				{
+					for (int i = 0; i < n; i++)
+					{
+						vector<int> nbsTemp = allVehiclesInaccNeighbors[vehicleIndex][i];
+						for (j = 0; j < nbsTemp.size(); j++)
+						{
+							x[i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+							y[i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+							for (k = 0; k < n; k++)
+							{
+								u[i][nbsTemp[j]][k].set(GRB_DoubleAttr_UB, 0);
+								u[i][k][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+								u[k][nbsTemp[j]][i].set(GRB_DoubleAttr_UB, 0);
+							}
+						}
+					}
+
+					// int numViolatedTriples = 0;
+					for (int i = 0; i < n; i++)
+						if (i != startNode && i != endNode)
+							for (auto &k : allVehiclesNodeNeighbors[vehicleIndex][i])
+								for (auto &j : allVehiclesNodeNeighbors[vehicleIndex][k])
+									if (i != j)
+										if (dis[startNode][i] + dis[i][k] + dis[k][j] + dis[j][endNode] > disLimit)
+										{
+											u[i][j][k].set(GRB_DoubleAttr_UB, 0);
+											// numViolatedTriples++;
+										}
+					// cout << "numViolatedTriples=" << numViolatedTriples << endl;
+				}
 
 				//==============generate constraints in Gurobi================
 				// vehicle goes out of vehicle's origin
 				GRBLinExpr expr1 = 0.0;
 				for (i = 0; i < n; i++)
-					expr1 += x[vehicleOrigin][i];
+					expr1 += x[startNode][i];
 				model.addConstr(expr1 == 1, "origin");
 
 				// vehicle goes back to node n
@@ -517,7 +641,7 @@ int main(int argc, char *argv[])
 				// flow conservation (the last node is the destination)
 				for (k = 0; k < n - 1; k++)
 				{
-					if (k != vehicleOrigin)
+					if (k != startNode)
 					{
 						GRBLinExpr expr = 0;
 						for (i = 0; i < n; i++)
@@ -593,8 +717,7 @@ int main(int argc, char *argv[])
 				model.optimize();
 
 				// write model to file
-				model.write(
-					"BPMP_" + itos(n) + "_" + itos(vehicleIndex) + ".lp");
+				// model.write("BPMP_" + itos(n) + "_" + itos(vehicleIndex) + ".lp");
 
 				//==============Extract solution from Gurobi================
 
@@ -950,6 +1073,38 @@ int main(int argc, char *argv[])
 						if (wt[i][j] == 0)
 							y[i][j][q].set(GRB_DoubleAttr_UB, 0);
 				}
+
+				if (ADD_PREPROCESS)
+				{
+					for (int i = 0; i < n; i++)
+					{
+						vector<int> nbsTemp = allVehiclesInaccNeighbors[q][i];
+						for (j = 0; j < nbsTemp.size(); j++)
+						{
+							x[i][nbsTemp[j]][q].set(GRB_DoubleAttr_UB, 0);
+							// y[i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+							for (k = 0; k < n; k++)
+							{
+								u[i][nbsTemp[j]][k][q].set(GRB_DoubleAttr_UB, 0);
+								u[i][k][nbsTemp[j]][q].set(GRB_DoubleAttr_UB, 0);
+								u[k][nbsTemp[j]][i][q].set(GRB_DoubleAttr_UB, 0);
+							}
+						}
+					}
+
+					// int numViolatedTriples = 0;
+					for (int i = 0; i < n; i++)
+						if (i != ogn && i != endNode)
+							for (auto &k : allVehiclesNodeNeighbors[q][i])
+								for (auto &j : allVehiclesNodeNeighbors[q][k])
+									if (i != j)
+										if (dis[ogn][i] + dis[i][k] + dis[k][j] + dis[j][endNode] > disLimit)
+										{
+											u[i][j][k][q].set(GRB_DoubleAttr_UB, 0);
+											// numViolatedTriples++;
+										}
+					// cout << "numViolatedTriples=" << numViolatedTriples << endl;
+				}
 			}
 
 			// preset all y vars LB and UB
@@ -957,14 +1112,13 @@ int main(int argc, char *argv[])
 				for (i = 0; i < n; i++)
 					for (j = 0; j < n; j++)
 					{
-						/*
-						 if (soly_d[i][j][q] > 0.5)
-						 {
-						 y[i][j][q].set (GRB_DoubleAttr_ScenNLB, 1.0);
-						 y[i][j][q].set (GRB_DoubleAttr_ScenNUB, 1.0);
-						 }
-						 else
-						 */
+						//  if (soly_d[i][j][q] > 0.5)
+						//  {
+						//  y[i][j][q].set (GRB_DoubleAttr_ScenNLB, 1.0);
+						//  y[i][j][q].set (GRB_DoubleAttr_ScenNUB, 1.0);
+						//  }
+						//  else
+
 						if (soly_d[i][j][q] < 0.5) // if the cargo is not selected in LR dual, then do not consider them in MVBPMP
 						{
 							y[i][j][q].set(GRB_DoubleAttr_LB, 0.0);
