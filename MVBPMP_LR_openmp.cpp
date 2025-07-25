@@ -59,6 +59,8 @@ bool ALL_VEHICLES_SAME_STARTNODE = false;
 
 double bigM = 10000000;
 
+int TIME_LIMIT = 3600;
+
 string
 itos(int i)
 {
@@ -231,20 +233,21 @@ int main(int argc, char *argv[])
 {
 	//********* only read graph info and vehicle info by arguments
 	//********* doesn't go through the graph info in the data folder
-	if (argc != 4)
+	if (argc != 5)
 	{
 		cout
-			<< "Usage: ./mvbpmp_openmp.x nodesDataNameAndPath numberOfVehicles vehicleDataNameAndPath"
+			<< "Usage: ./mvbpmp_openmp.x nodesDataNameAndPath numberOfVehicles(int) vehicleDataNameAndPath TIME_LIMIT(int)"
 			<< endl;
 		return 1;
 	}
 
-	if (argc == 4)
+	if (argc == 5)
 	{
 		cout << "Nodes Data: " << argv[1] << endl;
 		cout << "Number of Vehicles: " << argv[2] << endl;
 		cout << "Vehicles Data: " << argv[3] << endl;
 		numV = stoi(argv[2]);
+		TIME_LIMIT = stoi(argv[4]);
 	}
 
 	clock_t beginTime, endTimeOfLastIteration;
@@ -481,6 +484,10 @@ int main(int argc, char *argv[])
 	endTimeOfLastIterationWallClock = high_resolution_clock::now();
 	while ((UB - LB) / UB > LR_gap_tolerance)
 	{
+		auto endWallClock = high_resolution_clock::now();
+		auto elapsedWallClock = duration_cast<std::chrono::nanoseconds>(endWallClock - beginWallClock);
+		if ((int)elapsedWallClock > TIME_LIMIT)
+			break;
 
 		countItr++;
 		// stop after a certain iterations
