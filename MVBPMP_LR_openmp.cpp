@@ -486,7 +486,12 @@ int main(int argc, char *argv[])
 	{
 		auto endWallClock = high_resolution_clock::now();
 		auto elapsedWallClock = duration_cast<std::chrono::nanoseconds>(endWallClock - beginWallClock);
-		if ((int)elapsedWallClock > TIME_LIMIT)
+
+		auto timelimitnano = std::chrono::nanoseconds(TIME_LIMIT);
+
+		cout << "elapsedWallClock.count():" << elapsedWallClock.count() * 1e-9 << endl;
+		cout << "timelimitnano: " << timelimitnano.count() << endl;
+		if (elapsedWallClock.count() * 1e-9 > timelimitnano.count())
 			break;
 
 		countItr++;
