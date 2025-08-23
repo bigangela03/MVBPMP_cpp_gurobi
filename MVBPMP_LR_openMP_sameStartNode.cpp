@@ -61,7 +61,7 @@ bool PRINT_LRmultiplierTypeB_update_process = false;
 bool ADD_PREPROCESS = true;
 
 bool ADD_POTENTIAL_ARCS = true;
-bool RUN_IN_PARALLEL_OMP = false;
+bool RUN_IN_PARALLEL_OMP = true;
 
 double bigM = 10000000;
 
@@ -73,6 +73,7 @@ double ***soly_GRB = NULL;
 double ****solu_GRB = NULL;
 double **sols_GRB = NULL;
 double LBinGRB = -bigM;
+double UBinGRB = bigM;
 
 string
 itos(int i)
@@ -125,7 +126,10 @@ protected:
 			{
 				// Found an integer feasible solution
 				LBinGRB = getDoubleInfo(GRB_CB_MIPSOL_OBJ);
-				printf("\n======> GRB: an integer solution found, obj=%lf.\n", LBinGRB);
+				printf("\n======> GRB: an integer solution found, obj = %lf.\n", LBinGRB);
+
+				UBinGRB = getDoubleInfo(GRB_CB_MIPSOL_OBJBND);
+				printf("======> GRB: the current Upper Bound, UB = %lf.\n", UBinGRB);
 
 				int i, j, q;
 				// double ***x = NULL;
@@ -603,7 +607,6 @@ int main(int argc, char *argv[])
 
 	double UB = bigM;
 	double LB = -bigM;
-	// double LBinGRB = -bigM;
 
 	// double ***solx_GRB = new double **[n]; // solution x from solving MVBPMP in Gurobi
 	// double ***soly_GRB = new double **[n];
@@ -1191,9 +1194,9 @@ int main(int argc, char *argv[])
 				cout << "===> numOptimalProfitSol=" << numOptimalProfitSol << endl;
 
 				//====== get optimal solution y from numV best solutions
-				//if only numOptimalProfitSol solutions are optimal, then for the rest, use the best solution
-				//for example, if 3 vehicles, 2 different solutions have optimal proit, the 3rd one is a little bit worse
-				//then the 3rd one use the 1st vehicle's solution as it's solution
+				// if only numOptimalProfitSol solutions are optimal, then for the rest, use the best solution
+				// for example, if 3 vehicles, 2 different solutions have optimal proit, the 3rd one is a little bit worse
+				// then the 3rd one use the 1st vehicle's solution as it's solution
 				for (int q = 0; q < numV; q++)
 				{
 					for (int i = 0; i < n; i++)
@@ -1671,8 +1674,8 @@ int main(int argc, char *argv[])
 								// as the guide for calculating LB
 								// if ADD_POTENTIAL_ARCS is false, selectedPositiveProfitCargos[i][j] is all zeros
 								if (soly_numV_best_d[i][j][q] < 0.1 && selectedPositiveProfitCargos[i][j] < 0.1) // if the cargo is not selected in LR dual, then do not consider them in MVBPMP
-								{//defaul arcCandidates are all zeros
-									if (arcCandidates[i][j][q] < 0.1) // if arcCandidates[i][j]==1, it means y[i][j]can be considered in model, so no need to set it to be zero
+								{																																								 // defaul arcCandidates are all zeros
+									if (arcCandidates[i][j][q] < 0.1)																							 // if arcCandidates[i][j]==1, it means y[i][j]can be considered in model, so no need to set it to be zero
 									{
 										y[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
 									}
@@ -2003,6 +2006,12 @@ int main(int argc, char *argv[])
 					cout << "=== will stop loop because LR_miu < LR_miu_tolerance "
 							 << LR_miu_tolerance << endl;
 					break;
+				}
+
+				if (UB > UBinGRB)
+				{
+					UB = UBinGRB;
+					printf("===> UBinGRB = %lf is a better upper bound\n", UBinGRB);
 				}
 
 				printf("===> LB UB gap = %lf \n", (UB - LB) / UB);

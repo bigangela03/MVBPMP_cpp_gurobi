@@ -11,7 +11,7 @@
 #include <climits>
 #include <set>
 #include <string>
-#include <ctime>  //to measure CPU time
+#include <ctime>	//to measure CPU time
 #include <chrono> //to measure run time
 #include <time.h>
 
@@ -57,6 +57,8 @@ bool PRINT_LRmultiplierTypeB_update_process = false;
 bool ADD_PREPROCESS = true;
 bool ALL_VEHICLES_SAME_STARTNODE = false;
 
+bool ADD_POTENTIAL_ARCS = true;
+
 double bigM = 10000000;
 
 int TIME_LIMIT = 3600;
@@ -74,12 +76,12 @@ void printVar(double ***, double ***, double ****, int *);
 void updateLRmultiplierTypeB(double ***, double **, double, int, int);
 void reportTime(clock_t, auto);
 void storeBestLB(double ***, double ***, double ****, double **, double ***, double ***,
-				 double ****, double **);
+								 double ****, double **);
 
 //====================================================================================
 void storeBestLB(double ***solx_d, double ***soly_d, double ****solu_d,
-				 double **sols_d, double ***solx_best, double ***soly_best,
-				 double ****solu_best, double **sols_best, int n)
+								 double **sols_d, double ***solx_best, double ***soly_best,
+								 double ****solu_best, double **sols_best, int n)
 {
 	int i, j, k, q;
 	for (i = 0; i < n; i++)
@@ -104,7 +106,7 @@ void reportTime(clock_t begin, auto beginWallClock)
 	double computerTime = (double)(end - begin);
 	double second = computerTime / CLOCKS_PER_SEC;
 	printf("CPU time (on Linux): %lf computer time,  %lf seconds\n",
-		   computerTime, second);
+				 computerTime, second);
 
 	// wallclock time
 	auto endWallClock = high_resolution_clock::now();
@@ -113,7 +115,7 @@ void reportTime(clock_t begin, auto beginWallClock)
 }
 
 void updateLRmultiplierTypeB(double ***soly, double **LR_u, double LR_rou,
-							 int countItr, int numArcs)
+														 int countItr, int numArcs)
 {
 	int i, j, q;
 	int n = NUM_NODES;
@@ -167,8 +169,8 @@ void printVar(double ***solx, double ***soly, double ****solu, int *origin)
 	for (q = 0; q < numV; q++)
 	{
 		cout
-			<< "=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-="
-			<< endl;
+				<< "=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-="
+				<< endl;
 		printf("Vehicle %d starting at node %d:\n", q + 1, origin[q] + 1);
 
 		printf("x=1:\n");
@@ -194,11 +196,11 @@ void printVar(double ***solx, double ***soly, double ****solu, int *origin)
 		printf("\n");
 	}
 	cout << "=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-="
-		 << endl;
+			 << endl;
 }
 
 void updateLRmultiplierTypeC(double ***soly, double LR_lamda, double *LR_miu,
-							 double **LR_u, double LB, double totalProfit)
+														 double **LR_u, double LB, double totalProfit)
 {
 	int i, j, q;
 	// update LR multiplier LR_u
@@ -236,8 +238,8 @@ int main(int argc, char *argv[])
 	if (argc != 5)
 	{
 		cout
-			<< "Usage: ./mvbpmp_openmp.x nodesDataNameAndPath numberOfVehicles(int) vehicleDataNameAndPath TIME_LIMIT(int)"
-			<< endl;
+				<< "Usage: ./mvbpmp_openmp.x nodesDataNameAndPath numberOfVehicles(int) vehicleDataNameAndPath TIME_LIMIT(int)"
+				<< endl;
 		return 1;
 	}
 
@@ -317,6 +319,72 @@ int main(int argc, char *argv[])
 	// vehicles' startNode might be different, so the startNode will
 	// be defined for each vehicle in LR
 	int endNode = n - 1;
+
+	//============== pre-select some cargoes which can potentially make more profit ============
+
+	// by initialize int selectedPositiveProfitCargos[n][n] = {0}; we get some value in [0][x]=a strange number
+	// so we still initialize by each element;
+	// int selectedPositiveProfitCargos[n][n] = {0};
+	// int selectedPositiveProfitCargos[n][n];
+	int selectedPositiveProfitCargos[n][n];
+	for (int i = 0; i < n; i++)
+		for (int j = 0; j < n; j++)
+			selectedPositiveProfitCargos[i][j] = 0;
+
+	if (ADD_POTENTIAL_ARCS)
+	{
+		vector<Cargo> sortedCargos;
+
+		double potentialProfit[n][n];
+		int numPositivePotentialProfit = 0;
+
+		for (int i = 0; i < n; i++)
+			for (int j = 0; j < n; j++)
+			{
+				if ((i == j) || (i == (n - 1)) || (j == 0))
+					potentialProfit[i][j] = -1000000;
+				else
+					potentialProfit[i][j] = price * dis[i][j] * wt[i][j] - cost * dis[i][j] * wt[i][j] - cost * vw * dis[i][j];
+				// printf("profit(%d, %d) = %lf  dis:%lf  wt: %lf\n", i, j, potentialProfit[i][j], dis[i][j], wt[i][j]);
+
+				if (potentialProfit[i][j] > 0)
+					numPositivePotentialProfit++;
+
+				// struct Cargo newCargo = Cargo(i, j, potentialProfit[i][j]);
+				struct Cargo newCargo = {i, j, potentialProfit[i][j]};
+
+				sortedCargos.push_back(newCargo);
+			}
+
+		// Sort the vector using the custom comparison function
+		sort(sortedCargos.begin(), sortedCargos.end(), compareCargoByProfit);
+
+		// Print sorted order
+		// cout << "\nSorted by profit (descending):" << endl;
+		// for (const Cargo &c : sortedCargos)
+		// {
+		// 	// cout << c.origin << ", " << c.end << " " << c.potentialProfit << endl;
+		// 	int i = c.origin;
+		// 	int j = c.end;
+		// 	printf("profit(%d, %d) = %lf  dis:%lf  wt: %lf\n",
+		// 				 i, j, potentialProfit[i][j], dis[i][j], wt[i][j]);
+		// }
+
+		cout << "===> number of cargos selected from best potential profit cargos: " << ceil(numPositivePotentialProfit * 0.1) << endl;
+		for (int i = 0; i < ceil(numPositivePotentialProfit * 0.1); i++)
+		{
+			selectedPositiveProfitCargos[sortedCargos[i].origin][sortedCargos[i].end] = 1;
+		}
+
+		// Print sorted order
+		// cout << "\nselected cargos:" << endl;
+		// for (int i = 0; i < n; i++)
+		// 	for (int j = 0; j < n; j++)
+		// 		if (selectedPositiveProfitCargos[i][j] > 0)
+		// 		{
+		// 			printf("profit(%d, %d) = %lf  dis:%lf  wt: %lf\n", i, j, potentialProfit[i][j], dis[i][j], wt[i][j]);
+		// 		}
+	}
 
 	//============== add preprocess ==============
 	//===> check if visiting some arcs over distance limit
@@ -513,7 +581,7 @@ int main(int argc, char *argv[])
 		if (numParallelVehicles < numV)
 		{
 			cout << "Quit running: there are not enough threads available."
-				 << endl;
+					 << endl;
 			exit(1);
 		}
 
@@ -565,22 +633,22 @@ int main(int argc, char *argv[])
 				for (i = 0; i < n; i++)
 				{
 					s[i] = model.addVar(0.0, n, 0.0, GRB_CONTINUOUS,
-										"s_" + itos(i));
+															"s_" + itos(i));
 					for (j = 0; j < n; j++)
 					{
 						x[i][j] = model.addVar(0.0, 1.0, 0, GRB_BINARY,
-											   "x_" + itos(i) + "_" + itos(j));
+																	 "x_" + itos(i) + "_" + itos(j));
 						y[i][j] = model.addVar(0.0, 1.0, 0, GRB_BINARY,
-											   "y_" + itos(i) + "_" + itos(j));
+																	 "y_" + itos(i) + "_" + itos(j));
 						theta[i][j] = model.addVar(
-							0.0, GRB_INFINITY, 0.0, GRB_CONTINUOUS,
-							"theta_" + itos(i) + "_" + itos(j));
+								0.0, GRB_INFINITY, 0.0, GRB_CONTINUOUS,
+								"theta_" + itos(i) + "_" + itos(j));
 
 						for (k = 0; k < n; k++)
 						{
 							string s = "u_" + itos(i) + "_" + itos(j) + "_" + itos(k);
 							u[i][j][k] = model.addVar(0.0, GRB_INFINITY, 0.0,
-													  GRB_CONTINUOUS, s);
+																				GRB_CONTINUOUS, s);
 						}
 					}
 				}
@@ -661,7 +729,7 @@ int main(int argc, char *argv[])
 						for (j = 0; j < n; j++)
 							expr -= x[k][j];
 						model.addConstr(expr == 0,
-										"flow_conservation_" + itos(k));
+														"flow_conservation_" + itos(k));
 					}
 				}
 
@@ -688,7 +756,7 @@ int main(int argc, char *argv[])
 						GRBLinExpr expr = 0.0;
 						expr += s[i] - s[j] + (n - 1) * x[i][j] + (n - 3) * x[j][i];
 						model.addConstr(expr <= n - 2,
-										"s_" + itos(i) + "_" + itos(j));
+														"s_" + itos(i) + "_" + itos(j));
 					}
 
 				// arc flow
@@ -700,7 +768,7 @@ int main(int argc, char *argv[])
 						for (k = 0; k < n; k++)
 							expr += u[i][k][j] + u[k][j][i] - u[i][j][k];
 						model.addConstr(expr == 0,
-										"flow_" + itos(i) + "_" + itos(j));
+														"flow_" + itos(i) + "_" + itos(j));
 					}
 
 				// arc flow upperbound
@@ -710,7 +778,7 @@ int main(int argc, char *argv[])
 						GRBLinExpr expr = 0.0;
 						expr += theta[i][j] - Q * x[i][j];
 						model.addConstr(expr <= 0,
-										"flowBound_" + itos(i) + "_" + itos(j));
+														"flowBound_" + itos(i) + "_" + itos(j));
 					}
 
 				//==============set objective function in Gurobi================
@@ -884,7 +952,7 @@ int main(int argc, char *argv[])
 		if (LR_lamda <= LR_min_lamda)
 		{
 			cout << "===> LR_lamda is less than LR_min_damda " << LR_min_lamda
-				 << endl;
+					 << endl;
 			cout << "end loop";
 			break;
 		}
@@ -907,15 +975,15 @@ int main(int argc, char *argv[])
 				findOptimalSolution = true;
 
 				cout << "===> the abs(LR item) added in obj is less than "
-					 << LR_complementarity_tolerance << endl;
+						 << LR_complementarity_tolerance << endl;
 				cout << "===> the optimal solution is found :)" << endl;
 				cout << "===> end loop." << endl;
 
 				reportTime(endTimeOfLastIteration,
-						   endTimeOfLastIterationWallClock);
+									 endTimeOfLastIterationWallClock);
 
 				cout << "**************** THE OPTIMAL SOLUTION ****************"
-					 << endl;
+						 << endl;
 				printVar(solx_d, soly_d, solu_d, origin);
 
 				// no need to store the solution since the optimal solution is found
@@ -941,7 +1009,7 @@ int main(int argc, char *argv[])
 
 				// store the solution as the best LB
 				storeBestLB(solx_d, soly_d, solu_d, sols_d, solx_best, soly_best,
-							solu_best, sols_best, n);
+										solu_best, sols_best, n);
 			}
 
 			if (USE_LR_MULTIPLIER_TYPE_B)
@@ -950,7 +1018,7 @@ int main(int argc, char *argv[])
 			double LR_miu;
 			if (USE_LR_MULTIPLIER_TYPE_C)
 				updateLRmultiplierTypeC(soly_d, LR_lamda, &LR_miu, LR_u, LB,
-										profitInLRdual);
+																profitInLRdual);
 
 			reportTime(endTimeOfLastIteration, endTimeOfLastIterationWallClock);
 			endTimeOfLastIteration = clock();
@@ -961,15 +1029,15 @@ int main(int argc, char *argv[])
 				cout << "UB = " << UB << endl;
 				cout << "LB = " << LB << endl;
 				cout
-					<< "UB is less than LB, which is an error. Stop running and check code."
-					<< endl;
+						<< "UB is less than LB, which is an error. Stop running and check code."
+						<< endl;
 				exit(1);
 			}
 
 			if ((UB - LB) / UB <= LR_gap_tolerance)
 			{
 				cout << "=== will stop loop because gap " << (UB - LB) / UB
-					 << " < LR_gap_toleranc " << LR_gap_tolerance << endl;
+						 << " < LR_gap_toleranc " << LR_gap_tolerance << endl;
 
 				// here if(profitForLB > LB), it is already checked before
 				// and the new LB is stored
@@ -986,7 +1054,7 @@ int main(int argc, char *argv[])
 			if (LR_miu <= LR_miu_tolerance)
 			{
 				cout << "=== will stop loop because LR_miu < LR_miu_tolerance "
-					 << LR_miu_tolerance << endl;
+						 << LR_miu_tolerance << endl;
 
 				// here if(profitForLB > LB), it is already checked before
 				// and the new LB is stored
@@ -1047,27 +1115,27 @@ int main(int argc, char *argv[])
 				for (i = 0; i < n; i++)
 				{
 					s[i][q] = model.addVar(0.0, n, 0.0, GRB_CONTINUOUS,
-										   "s_" + itos(i) + "_" + itos(q));
+																 "s_" + itos(i) + "_" + itos(q));
 					for (j = 0; j < n; j++)
 					{
 						x[i][j][q] = model.addVar(
-							0.0, 1.0, 0, GRB_BINARY,
-							"x_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+								0.0, 1.0, 0, GRB_BINARY,
+								"x_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 						y[i][j][q] = model.addVar(
-							0.0, 1.0, 0, GRB_BINARY,
-							"y_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+								0.0, 1.0, 0, GRB_BINARY,
+								"y_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 						theta[i][j][q] = model.addVar(
-							0.0,
-							GRB_INFINITY,
-							0.0,
-							GRB_CONTINUOUS,
-							"theta_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+								0.0,
+								GRB_INFINITY,
+								0.0,
+								GRB_CONTINUOUS,
+								"theta_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 
 						for (k = 0; k < n; k++)
 						{
 							string s = "u_" + itos(i) + "_" + itos(j) + "_" + itos(k) + "_" + itos(q);
 							u[i][j][k][q] = model.addVar(0.0, GRB_INFINITY, 0.0,
-														 GRB_CONTINUOUS, s);
+																					 GRB_CONTINUOUS, s);
 						}
 					}
 				}
@@ -1119,24 +1187,160 @@ int main(int argc, char *argv[])
 				}
 			}
 
-			// preset all y vars LB and UB
+			int arcCandidates[n][n][numV];
+			for (q = 0; q < numV; q++)
+				for (i = 0; i < n; i++)
+					for (j = 0; j < n; j++)
+						arcCandidates[i][j][q] = 0;
+
+			if (ADD_POTENTIAL_ARCS)
+			{
+				//===> preset all y vars LB and UB
+				//===> if cargo (i,j) is picked up multiple times,
+				// select node x so that (i,x) and (x,j) is within distance limit and weight limit
+				// if cargo (h,i) is not accepeted, (j,k) accepted, then also consider (h,x),(x,j)
+				// if cargo (j,k) is not accepeted, (h,i) accepted, then also consier (i,x),(x,k)
+				// if (h,i) (j,k) are not accepted, also consier (h,x),(x,k)
+
+				vector<double> distSumTemp; // temp: temparoray use
+
+				for (q = 0; q < numV; q++)
+					distSumTemp.push_back(0);
+
+				for (q = 0; q < numV; q++)
+					for (i = 0; i < n; i++)
+						for (j = 0; j < n; j++)
+						{
+							arcCandidates[i][j][q] = 0;
+							distSumTemp[q] += dis[i][j] * solx_numV_best_d[i][j][q];
+						}
+
+				for (int q1 = 0; q1 < numV - 1; q1++)
+					for (int q2 = q1 + 1; q2 < numV; q2++)
+						for (i = 0; i < n; i++)
+							for (j = 0; j < n; j++)
+							{
+
+								vector<int> startNodesSet;
+								vector<int> endNodesSet;
+								if (soly_numV_best_d[i][j][q1] + soly_numV_best_d[i][j][q2] > 1.9) // if there is conflict
+								{
+									startNodesSet.push_back(i);
+									endNodesSet.push_back(j);
+
+									vector<double> availDist = {disLimit - distSumTemp[q1] + dis[i][j], disLimit - distSumTemp[q2] + dis[i][j]};
+
+									vector<int> vehiclesTemp = {q1, q2};
+
+									// for (auto &vehTemp : vehiclesTemp)
+									for (int vehIndex = 0; vehIndex < vehiclesTemp.size(); vehIndex++)
+									{
+										int vehTemp = vehiclesTemp[vehIndex];
+										for (int k = 0; k < n; k++)
+											if (solx_numV_best_d[k][i][vehTemp] > 0.9)
+												if (soly_numV_best_d[k][i][vehTemp] < 0.1) // if the previous visited arc is not an accepted cargo
+												{
+													startNodesSet.push_back(k);
+													availDist[vehIndex] = availDist[vehIndex] + dis[k][i];
+												}
+
+										for (int k = 0; k < n; k++)
+											if (solx_numV_best_d[j][k][vehTemp] > 0.9)
+												if (soly_numV_best_d[j][k][vehTemp] < 0.1)
+												{
+													endNodesSet.push_back(k);
+													availDist[vehIndex] = availDist[vehIndex] + dis[j][k];
+												}
+
+										for (auto &k1 : startNodesSet)
+											for (auto &k2 : endNodesSet)
+												for (int k3 = 0; k3 < n; k3++)
+													if (dis[k1][k3] + dis[k3][k2] <= availDist[vehTemp])
+													{
+														arcCandidates[k1][k3][vehTemp] = 1;
+														arcCandidates[k3][k2][vehTemp] = 1;
+													}
+									}
+								}
+							}
+
+				// for (q = 0; q < numV; q++)
+				// {
+				// 	cout << "vehicle " << q + 1 << endl;
+				// 	for (i = 0; i < n; i++)
+				// 		for (j = 0; j < n; j++)
+				// 			if (arcCandidates[i][j][q] > 0.9)
+				// 				printf("%d-%d, ", i + 1, j + 1);
+				// 	cout << endl;
+				// }
+
+				// if a node has no cargos in or out, then it won't be visited
+
+				for (q = 0; q < numV; q++)
+				{
+					int ogn = origin[q];
+					for (i = 0; i < n - 1; i++)
+					{
+						if (i == ogn)
+							continue;
+working this line !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+						int sumY = 0;
+						for (j = 0; j < n; j++)
+						{
+							sumY += soly_numV_best_d[i][j][q] + soly_numV_best_d[j][i][q];
+							sumY += selectedPositiveProfitCargos[i][j] + selectedPositiveProfitCargos[j][i];
+							sumY += arcCandidates[i][j][q] + arcCandidates[j][i][q];
+						}
+						if (sumY < 0.1)
+							for (j = 0; j < n; j++)
+							{
+								x[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
+								x[j][i][q].set(GRB_DoubleAttr_UB, 0.0);
+							}
+					}
+				}
+			}
+
 			for (q = 0; q < numV; q++)
 				for (i = 0; i < n; i++)
 					for (j = 0; j < n; j++)
 					{
-						//  if (soly_d[i][j][q] > 0.5)
+						//  if (soly_numV_best_d[i][j][q] > 0.9)
 						//  {
 						//  y[i][j][q].set (GRB_DoubleAttr_ScenNLB, 1.0);
 						//  y[i][j][q].set (GRB_DoubleAttr_ScenNUB, 1.0);
 						//  }
 						//  else
-
-						if (soly_d[i][j][q] < 0.5) // if the cargo is not selected in LR dual, then do not consider them in MVBPMP
-						{
-							y[i][j][q].set(GRB_DoubleAttr_LB, 0.0);
-							y[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
+						// use numV best solution from solving single vehicle problem above
+						// as the guide for calculating LB
+						// if ADD_POTENTIAL_ARCS is false, selectedPositiveProfitCargos[i][j] is all zeros
+						if (soly_numV_best_d[i][j][q] < 0.1 && selectedPositiveProfitCargos[i][j] < 0.1) // if the cargo is not selected in LR dual, then do not consider them in MVBPMP
+						{																																								 // defaul arcCandidates are all zeros
+							if (arcCandidates[i][j][q] < 0.1)																							 // if arcCandidates[i][j]==1, it means y[i][j]can be considered in model, so no need to set it to be zero
+							{
+								y[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
+							}
 						}
 					}
+
+			// // preset all y vars LB and UB
+			// for (q = 0; q < numV; q++)
+			// 	for (i = 0; i < n; i++)
+			// 		for (j = 0; j < n; j++)
+			// 		{
+			// 			//  if (soly_d[i][j][q] > 0.5)
+			// 			//  {
+			// 			//  y[i][j][q].set (GRB_DoubleAttr_ScenNLB, 1.0);
+			// 			//  y[i][j][q].set (GRB_DoubleAttr_ScenNUB, 1.0);
+			// 			//  }
+			// 			//  else
+
+			// 			if (soly_d[i][j][q] < 0.5) // if the cargo is not selected in LR dual, then do not consider them in MVBPMP
+			// 			{
+			// 				y[i][j][q].set(GRB_DoubleAttr_LB, 0.0);
+			// 				y[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
+			// 			}
+			// 		}
 
 			// set up constraints
 			GRBConstr *vehOriginConstr = 0;
@@ -1155,7 +1359,7 @@ int main(int argc, char *argv[])
 
 				// model.addConstr (expr1 == 1, "origin_" + itos (q));
 				vehOriginConstr[q] = model.addConstr(expr1 == 1,
-													 "origin_" + itos(q));
+																						 "origin_" + itos(q));
 
 				// vehicle goes back to node n
 				GRBLinExpr expr2 = 0.0;
@@ -1163,7 +1367,7 @@ int main(int argc, char *argv[])
 					expr2 += x[i][n - 1][q];
 				// model.addConstr (expr2 == 1, "destination_" + itos (q));
 				vehDestConstr[q] = model.addConstr(expr2 == 1,
-												   "destination_" + itos(q));
+																					 "destination_" + itos(q));
 
 				// flow conservation
 				for (int k = 0; k < n - 1; k++)
@@ -1180,8 +1384,8 @@ int main(int argc, char *argv[])
 						for (j = 0; j < n; j++)
 							expr -= x[k][j][q];
 						model.addConstr(
-							expr == 0,
-							"flow_conservation_" + itos(k) + "_" + itos(q));
+								expr == 0,
+								"flow_conservation_" + itos(k) + "_" + itos(q));
 					}
 				}
 
@@ -1199,7 +1403,7 @@ int main(int argc, char *argv[])
 					for (i = 0; i < n - 1; i++)
 						expr += x[i][j][q];
 					model.addConstr(expr <= 1,
-									"indegree_" + itos(j) + "_" + itos(q));
+													"indegree_" + itos(j) + "_" + itos(q));
 				}
 
 				// subtour elimination
@@ -1209,8 +1413,8 @@ int main(int argc, char *argv[])
 						GRBLinExpr expr = 0.0;
 						expr += s[i][q] - s[j][q] + (n - 1) * x[i][j][q] + (n - 3) * x[j][i][q];
 						model.addConstr(
-							expr <= n - 2,
-							"subtour_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+								expr <= n - 2,
+								"subtour_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 					}
 
 				// arc flow
@@ -1231,8 +1435,8 @@ int main(int argc, char *argv[])
 						if (j != n - 1)
 							expr += u[i][n - 1][j][q];
 						model.addConstr(
-							expr == 0,
-							"flow_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+								expr == 0,
+								"flow_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 
 						/*
 						 expr += wt[i][j] * y[i][j][q] - theta[i][j][q];
@@ -1248,8 +1452,8 @@ int main(int argc, char *argv[])
 						GRBLinExpr expr = 0.0;
 						expr += theta[i][j][q] - Q * x[i][j][q];
 						model.addConstr(
-							expr <= 0,
-							"flowBound_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+								expr <= 0,
+								"flowBound_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 					}
 
 				// add redundant constraint to test if same multi obj value
@@ -1279,7 +1483,7 @@ int main(int argc, char *argv[])
 					for (q = 0; q < numV; q++)
 						expr += y[i][j][q];
 					model.addConstr(expr <= 1,
-									"one-one" + itos(i) + "_" + itos(j));
+													"one-one" + itos(i) + "_" + itos(j));
 				}
 
 			// set up objective
@@ -1308,7 +1512,7 @@ int main(int argc, char *argv[])
 			if (status == GRB_INF_OR_UNBD || status == GRB_INFEASIBLE || status == GRB_UNBOUNDED)
 			{
 				cout << "The model cannot be solved "
-					 << "because it is infeasible or unbounded" << endl;
+						 << "because it is infeasible or unbounded" << endl;
 				return 1;
 			}
 			if (status != GRB_OPTIMAL)
@@ -1372,14 +1576,14 @@ int main(int argc, char *argv[])
 							soly[i][j][q] = y[i][j][q].get(GRB_DoubleAttr_X);
 							for (k = 0; k < n; k++)
 								solu[i][j][k][q] = u[i][j][k][q].get(
-									GRB_DoubleAttr_X);
+										GRB_DoubleAttr_X);
 						}
 					}
 
 				// store the solution as the best LB
 				if (findBetterLB)
 					storeBestLB(solx, soly, solu, sols, solx_best, soly_best,
-								solu_best, sols_best, n);
+											solu_best, sols_best, n);
 
 				printf("Selected arcs: \n");
 				for (q = 0; q < numV; q++)
@@ -1450,18 +1654,18 @@ int main(int argc, char *argv[])
 		double LR_miu;
 		if (USE_LR_MULTIPLIER_TYPE_C)
 			updateLRmultiplierTypeC(soly_d, LR_lamda, &LR_miu, LR_u, LB,
-									profitInLRdual);
+															profitInLRdual);
 		if (LR_miu <= LR_miu_tolerance)
 		{
 			cout << "=== will stop loop because LR_miu < LR_miu_tolerance "
-				 << LR_miu_tolerance << endl;
+					 << LR_miu_tolerance << endl;
 			break;
 		}
 
 		printf("===> LB UB gap = %lf \n", (UB - LB) / UB);
 		if ((UB - LB) / UB <= LR_gap_tolerance)
 			cout << "=== will stop loop because gap < LR_gap_toleranc "
-				 << LR_gap_tolerance << endl;
+					 << LR_gap_tolerance << endl;
 
 		reportTime(endTimeOfLastIteration, endTimeOfLastIterationWallClock);
 		endTimeOfLastIteration = clock();
@@ -1497,8 +1701,8 @@ int main(int argc, char *argv[])
 	}
 
 	cout << endl
-		 << "===> The total time since setting up Gurobi environment: "
-		 << endl;
+			 << "===> The total time since setting up Gurobi environment: "
+			 << endl;
 	reportTime(beginTime, beginWallClock);
 
 	clock_t end = clock();
@@ -1510,7 +1714,7 @@ int main(int argc, char *argv[])
 	cout << "===> SUMMARY:" << endl;
 	printf("SolutionTimeCPU = %lf\n", second);
 	printf("SolutionTimeWallClock = %.3f seconds\n",
-		   elapsedWallClock.count() * 1e-9);
+				 elapsedWallClock.count() * 1e-9);
 	printf("SolutionLB = %lf\n", LB);
 	printf("SolutionUB = %lf\n", UB);
 	printf("SolutionGap = %lf\n", (UB - LB) / UB);
@@ -1530,13 +1734,13 @@ int main(int argc, char *argv[])
 		{
 			stage2TimeLimit = 86400 - secInStage1 - 300;
 			cout << "stage2TimeLimit = 86400 - secInStage1 - 300 = "
-				 << stage2TimeLimit << endl;
+					 << stage2TimeLimit << endl;
 		}
 		else
 		{
 			cout
-				<< "===> There is not enough time for stage 2 running.Quit running."
-				<< endl;
+					<< "===> There is not enough time for stage 2 running.Quit running."
+					<< endl;
 			return 0;
 		}
 
@@ -1576,27 +1780,27 @@ int main(int argc, char *argv[])
 				for (i = 0; i < n; i++)
 				{
 					s[i][q] = model.addVar(0.0, n, 0.0, GRB_CONTINUOUS,
-										   "s_" + itos(i) + "_" + itos(q));
+																 "s_" + itos(i) + "_" + itos(q));
 					for (j = 0; j < n; j++)
 					{
 						x[i][j][q] = model.addVar(
-							0.0, 1.0, 0, GRB_BINARY,
-							"x_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+								0.0, 1.0, 0, GRB_BINARY,
+								"x_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 						y[i][j][q] = model.addVar(
-							0.0, 1.0, 0, GRB_BINARY,
-							"y_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+								0.0, 1.0, 0, GRB_BINARY,
+								"y_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 						theta[i][j][q] = model.addVar(
-							0.0,
-							GRB_INFINITY,
-							0.0,
-							GRB_CONTINUOUS,
-							"theta_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+								0.0,
+								GRB_INFINITY,
+								0.0,
+								GRB_CONTINUOUS,
+								"theta_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 
 						for (k = 0; k < n; k++)
 						{
 							string s = "u_" + itos(i) + "_" + itos(j) + "_" + itos(k) + "_" + itos(q);
 							u[i][j][k][q] = model.addVar(0.0, GRB_INFINITY, 0.0,
-														 GRB_CONTINUOUS, s);
+																					 GRB_CONTINUOUS, s);
 						}
 					}
 				}
@@ -1633,7 +1837,7 @@ int main(int argc, char *argv[])
 
 				// model.addConstr (expr1 == 1, "origin_" + itos (q));
 				vehOriginConstr[q] = model.addConstr(expr1 == 1,
-													 "origin_" + itos(q));
+																						 "origin_" + itos(q));
 
 				// vehicle goes back to node n
 				GRBLinExpr expr2 = 0.0;
@@ -1641,7 +1845,7 @@ int main(int argc, char *argv[])
 					expr2 += x[i][n - 1][q];
 				// model.addConstr (expr2 == 1, "destination_" + itos (q));
 				vehDestConstr[q] = model.addConstr(expr2 == 1,
-												   "destination_" + itos(q));
+																					 "destination_" + itos(q));
 
 				// flow conservation
 				for (int k = 0; k < n - 1; k++)
@@ -1658,8 +1862,8 @@ int main(int argc, char *argv[])
 						for (j = 0; j < n; j++)
 							expr -= x[k][j][q];
 						model.addConstr(
-							expr == 0,
-							"flow_conservation_" + itos(k) + "_" + itos(q));
+								expr == 0,
+								"flow_conservation_" + itos(k) + "_" + itos(q));
 					}
 				}
 
@@ -1677,7 +1881,7 @@ int main(int argc, char *argv[])
 					for (i = 0; i < n - 1; i++)
 						expr += x[i][j][q];
 					model.addConstr(expr <= 1,
-									"indegree_" + itos(j) + "_" + itos(q));
+													"indegree_" + itos(j) + "_" + itos(q));
 				}
 
 				// subtour elimination
@@ -1687,8 +1891,8 @@ int main(int argc, char *argv[])
 						GRBLinExpr expr = 0.0;
 						expr += s[i][q] - s[j][q] + (n - 1) * x[i][j][q] + (n - 3) * x[j][i][q];
 						model.addConstr(
-							expr <= n - 2,
-							"subtour_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+								expr <= n - 2,
+								"subtour_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 					}
 
 				// arc flow
@@ -1709,8 +1913,8 @@ int main(int argc, char *argv[])
 						if (j != n - 1)
 							expr += u[i][n - 1][j][q];
 						model.addConstr(
-							expr == 0,
-							"flow_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+								expr == 0,
+								"flow_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 
 						/*
 						 expr += wt[i][j] * y[i][j][q] - theta[i][j][q];
@@ -1726,8 +1930,8 @@ int main(int argc, char *argv[])
 						GRBLinExpr expr = 0.0;
 						expr += theta[i][j][q] - Q * x[i][j][q];
 						model.addConstr(
-							expr <= 0,
-							"flowBound_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+								expr <= 0,
+								"flowBound_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 					}
 			}
 
@@ -1740,7 +1944,7 @@ int main(int argc, char *argv[])
 					for (q = 0; q < numV; q++)
 						expr += y[i][j][q];
 					model.addConstr(expr <= 1,
-									"one-one" + itos(i) + "_" + itos(j));
+													"one-one" + itos(i) + "_" + itos(j));
 				}
 
 			// set up objective
@@ -1787,7 +1991,7 @@ int main(int argc, char *argv[])
 						y[i][j][q].set(GRB_DoubleAttr_Start, soly_best[i][j][q]);
 						for (k = 0; k < n; k++)
 							u[i][j][k][q].set(GRB_DoubleAttr_Start,
-											  solu_best[i][j][k][q]);
+																solu_best[i][j][k][q]);
 					}
 				}
 			//*****************************************************
@@ -1808,7 +2012,7 @@ int main(int argc, char *argv[])
 			if (status == GRB_INF_OR_UNBD || status == GRB_INFEASIBLE || status == GRB_UNBOUNDED)
 			{
 				cout << "The model cannot be solved "
-					 << "because it is infeasible or unbounded" << endl;
+						 << "because it is infeasible or unbounded" << endl;
 				return 1;
 			}
 			if (status != GRB_OPTIMAL)
@@ -1870,14 +2074,14 @@ int main(int argc, char *argv[])
 							soly[i][j][q] = y[i][j][q].get(GRB_DoubleAttr_X);
 							for (k = 0; k < n; k++)
 								solu[i][j][k][q] = u[i][j][k][q].get(
-									GRB_DoubleAttr_X);
+										GRB_DoubleAttr_X);
 						}
 					}
 
 				// store the solution as the best LB
 				if (findBetterLB)
 					storeBestLB(solx, soly, solu, sols, solx_best, soly_best,
-								solu_best, sols_best, n);
+											solu_best, sols_best, n);
 
 				printf("Selected arcs: \n");
 				for (q = 0; q < numV; q++)
@@ -1951,10 +2155,10 @@ int main(int argc, char *argv[])
 		printf("time_Stage1 = %.3f seconds\n", elapsedWallClock.count() * 1e-9);
 
 		printf("time_Stage2 = %.3f seconds\n",
-			   elapsedWallClockStage2.count() * 1e-9);
+					 elapsedWallClockStage2.count() * 1e-9);
 
 		printf("time_BothStages = %.3f seconds\n",
-			   elapsedWallClockBothStages.count() * 1e-9);
+					 elapsedWallClockBothStages.count() * 1e-9);
 	}
 
 	//********************************** END of STAGE 2 **********************************
