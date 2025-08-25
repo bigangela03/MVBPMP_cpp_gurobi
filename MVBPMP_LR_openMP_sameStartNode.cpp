@@ -61,11 +61,10 @@ bool PRINT_LRmultiplierTypeB_update_process = false;
 bool ADD_PREPROCESS = true;
 
 bool ADD_POTENTIAL_ARCS = true;
-bool RUN_IN_PARALLEL_OMP = true;
+bool RUN_IN_PARALLEL_OMP = true; // it will be overwritten by passed arguments
+int TIME_LIMIT = 3600;					 // it will be overwritten by passed arguments
 
 double bigM = 10000000;
-
-int TIME_LIMIT = 3600;
 
 // solution from solving MVBPMP in Gurobi
 double ***solx_GRB = NULL;
@@ -203,29 +202,49 @@ void updateLRmultiplierTypeC(double ***, double, double *, double **, double, do
 void printVar(double ***, double ***, double ****, int *);
 void updateLRmultiplierTypeB(double ***, double **, double, int, int);
 void reportTime(clock_t, auto);
-void storeBestLB(double ***, double ***, double ****, double **, double ***, double ***,
-								 double ****, double **);
+// void storeBestLB(double ***, double ***, double ****, double **, double ***, double ***,
+// 								 double ****, double **,int);
+void storeBestLB(double ***, double ***, double ***, double ***, int);
 
 //====================================================================================
-void storeBestLB(double ***solx_d, double ***soly_d, double ****solu_d,
-								 double **sols_d, double ***solx_best, double ***soly_best,
-								 double ****solu_best, double **sols_best, int n)
+// void storeBestLB(double ***solx_d, double ***soly_d, double ****solu_d,
+// 								 double **sols_d, double ***solx_best, double ***soly_best,
+// 								 double ****solu_best, double **sols_best, int n)
+// {
+// 	int i, j, k, q;
+// 	for (i = 0; i < n; i++)
+// 		for (q = 0; q < numV; q++)
+// 		{
+// 			sols_best[i][q] = sols_d[i][q];
+// 			for (j = 0; j < n; j++)
+// 			{
+// 				solx_best[i][j][q] = solx_d[i][j][q];
+// 				soly_best[i][j][q] = soly_d[i][j][q];
+
+// 				for (k = 0; k < n; k++)
+// 					solu_best[i][j][k][q] = solu_d[i][j][k][q];
+// 			}
+// 		}
+// }
+
+void storeBestLB(double ***solx_d, double ***soly_d, double ***solx_best, double ***soly_best, int n)
 {
 	int i, j, k, q;
 	for (i = 0; i < n; i++)
 		for (q = 0; q < numV; q++)
 		{
-			sols_best[i][q] = sols_d[i][q];
+			// sols_best[i][q] = sols_d[i][q];
 			for (j = 0; j < n; j++)
 			{
 				solx_best[i][j][q] = solx_d[i][j][q];
 				soly_best[i][j][q] = soly_d[i][j][q];
 
-				for (k = 0; k < n; k++)
-					solu_best[i][j][k][q] = solu_d[i][j][k][q];
+				// for (k = 0; k < n; k++)
+				// 	solu_best[i][j][k][q] = solu_d[i][j][k][q];
 			}
 		}
 }
+
 void reportTime(clock_t begin, auto beginWallClock)
 {
 	// clock() gives cpu time on Linux, and wall time on Windows.
@@ -363,21 +382,34 @@ int main(int argc, char *argv[])
 {
 	//********* only read graph info and vehicle info by arguments
 	//********* doesn't go through the graph info in the data folder
-	if (argc != 5)
+	if (argc != 6)
 	{
 		cout
-				<< "Usage: ./mvbpmp_openmp.x nodesDataNameAndPath numberOfVehicles(int) vehicleDataNameAndPath TIME_LIMIT(int)"
+				<< "Usage: ./mvbpmp_openmp.x nodesDataNameAndPath numberOfVehicles(int) vehicleDataNameAndPath TIME_LIMIT(int) useOMP(or noOMP)"
 				<< endl;
+		cout << "useOMP means MVBPMP will be solved by Gurobi in Thread 1 in paralle with Lagrangian relaxation in Thread 0" << endl;
+		cout << "noOMP means program will only run Lagrangian relaxation in Thread 0." << endl;
 		return 1;
 	}
 
-	if (argc == 5)
+	if (argc == 6)
 	{
 		cout << "Nodes Data: " << argv[1] << endl;
 		cout << "Number of Vehicles: " << argv[2] << endl;
 		cout << "Vehicles Data: " << argv[3] << endl;
 		numV = stoi(argv[2]);
 		TIME_LIMIT = stoi(argv[4]);
+
+		string argument5 = argv[5]; 
+		if (argument5 == "useOMP")
+			RUN_IN_PARALLEL_OMP = true;
+		else if (argument5 == "noOMP")
+			RUN_IN_PARALLEL_OMP = false;
+		else
+		{
+			cout << "ERROR: the 5th argument should be string useOMP or noOMP" << endl;
+			exit(1);
+		}
 	}
 
 	clock_t beginTime, endTimeOfLastIteration;
@@ -1224,23 +1256,14 @@ int main(int argc, char *argv[])
 				// is feasible for the original problem
 				double sum_LR_u = 0;
 				double sum_LR_u_times_y = 0;
-				bool findConflictPickup = false;
+				bool findConflictPickupInOptSol = false;
+				bool findConflictPickupInNumVehBestSol = false;
 				for (int i = 0; i < n; i++)
 					for (int j = 0; j < n; j++)
 					{
 						sum_LR_u += LR_u[i][j];
 
 						double sum = 0;
-						// here sum is used to tell if there is any conflict when pick up cargo
-						// for (int q = 0; q < numV; q++)
-						// 	sum += soly_numV_best_d[i][j][q];
-						// if (sum > 1.9)
-						// {
-						// 	findConflictPickup = true;
-						// 	cout << "===> the conflicts of " << numV << " best solutions:" << endl;
-						// 	I if (PRINT_CONFLICT_PICKUP)
-						// 			printf("===> conflict %d -> %d\n", i + 1, j + 1);
-						// }
 
 						// here sum is for calculation of UB, so only the best profit solution is used
 						sum = 0;
@@ -1249,7 +1272,7 @@ int main(int argc, char *argv[])
 
 						if (sum > 1.9)
 						{
-							findConflictPickup = true;
+							findConflictPickupInOptSol = true;
 							if (PRINT_CONFLICT_PICKUP)
 								printf("===> conflict %d -> %d\n", i + 1, j + 1);
 						}
@@ -1297,50 +1320,102 @@ int main(int argc, char *argv[])
 					break;
 				}
 
+				for (int i = 0; i < n; i++)
+				{
+					for (int j = 0; j < n; j++)
+					{
+						// check if there are pickup conflicts in numV best solutions
+						double sum = 0;
+						for (int q = 0; q < numV; q++)
+							sum += soly_numV_best_d[i][j][q];
+
+						if (sum > 1.9)
+						{
+							findConflictPickupInNumVehBestSol = true;
+							break;
+						}
+					}
+					if (findConflictPickupInNumVehBestSol)
+						break;
+				}
+
 				//===> if there is no request conflict
 				//===> use the current solution without LR item as LB
-				if (!findConflictPickup)
+				// if (!findConflictPickupInOptSol)
+				if (!findConflictPickupInNumVehBestSol)
 				{
-					cout << "===> There is no request conflict in solution :)" << endl;
+					cout << "===> There is no request conflict in numV best solutions :)" << endl;
 
-					// check if the LR_item is close to zero
-					// if yes, then this is the optimal solution
-					double LR_item = sum_LR_u - sum_LR_u_times_y;
-					cout << "===> the LR items added in obj = " << LR_item << endl;
+					double profitForLB;
 
-					if ((LR_item >= 0 && LR_item <= LR_complementarity_tolerance) || (LR_item < 0 && LR_item >= -LR_complementarity_tolerance))
+					if (numOptimalProfitSol == numV)
 					{
-						LB = profitInLRdual - LR_item;
+						// check if the LR_item is close to zero
+						// if yes, then this is the optimal solution
+						double LR_item = sum_LR_u - sum_LR_u_times_y;
+						cout << "===> the LR items added in obj = " << LR_item << endl;
 
-						findOptimalSolution = true;
+						if ((LR_item >= 0 && LR_item <= LR_complementarity_tolerance) || (LR_item < 0 && LR_item >= -LR_complementarity_tolerance))
+						{
+							LB = profitInLRdual - LR_item;
 
-						cout << "===> the abs(LR item) added in obj is less than "
-								 << LR_complementarity_tolerance << endl;
-						cout << "===> the optimal solution is found :)" << endl;
-						cout << "===> end loop." << endl;
+							findOptimalSolution = true;
 
-						reportTime(endTimeOfLastIteration,
-											 endTimeOfLastIterationWallClock);
+							cout << "===> the abs(LR item) added in obj is less than "
+									 << LR_complementarity_tolerance << endl;
+							cout << "===> the optimal solution is found :)" << endl;
+							cout << "===> end loop." << endl;
 
-						cout << "**************** THE OPTIMAL SOLUTION ****************"
-								 << endl;
-						printVar(solx_opt_d, soly_opt_d, solu_d, origin);
+							reportTime(endTimeOfLastIteration,
+												 endTimeOfLastIterationWallClock);
 
-						// no need to store the solution since the optimal solution is found
-						// and there is no need to feed solution to MVBPMP model to find optimal solution
-						break;
+							cout << "**************** THE OPTIMAL SOLUTION ****************"
+									 << endl;
+							printVar(solx_opt_d, soly_opt_d, solu_d, origin);
+
+							// no need to store the solution since the optimal solution is found
+							// and there is no need to feed solution to MVBPMP model to find optimal solution
+							break;
+						}
+						else
+						{
+							// if LR_item is still big, then we need to keep iteration
+							cout << "===> Use this solution to calculate LB." << endl;
+
+							// since no request conflict
+							// so the solution for x, y, u are feasible for the original model
+							// but - u_(i,j)*( 1-sum_q y(i,j,q) ) was added to obj
+							// so we need to recalculte total profit
+							profitForLB = profitInLRdual;
+							profitForLB += sum_LR_u_times_y;
+							profitForLB -= sum_LR_u;
+						}
 					}
+					else
+					{
+						if (numOptimalProfitSol > numV)
+						{
+							cout << "ERROR: numOptimalProfitSol should be alwasy <= numV! Exit." << endl;
+							exit(1);
+						}
 
-					// if LR_item is still big, then we need to keep iteration
-					cout << "===> Use this solution to calculate LB." << endl;
+						profitForLB = 0;
+						for (int q = 0; q < numV; q++)
+							profitForLB += profit_d[q];
 
-					// since no request conflict
-					// so the solution for x, y, u are feasible for the original model
-					// but - u_(i,j)*( 1-sum_q y(i,j,q) ) was added to obj
-					// so we need to recalculte total profit
-					double profitForLB = profitInLRdual;
-					profitForLB += sum_LR_u_times_y;
-					profitForLB -= sum_LR_u;
+						for (int i = 0; i < n; i++)
+							for (int j = 0; j < n; j++)
+							{
+								double sum = 0;
+
+								// here sum is for calculation of UB, so only the best profit solution is used
+								sum = 0;
+								for (int q = 0; q < numV; q++)
+									sum += soly_numV_best_d[i][j][q];
+
+								profitForLB += LR_u[i][j] * sum;
+							}
+					}
 
 					double LR_miu;
 
@@ -1350,23 +1425,20 @@ int main(int argc, char *argv[])
 						cout << "===> During LR loop, find a better LB from LR dual = " << LB << endl;
 
 						// store the solution as the best LB
-						storeBestLB(solx_opt_d, soly_opt_d, solu_d, sols_d, solx_best, soly_best,
-												solu_best, sols_best, n);
-
-						if (USE_LR_MULTIPLIER_TYPE_C)
-							updateLRmultiplierTypeC(soly_opt_d, LR_lamda, &LR_miu, LR_u, LB,
-																			profitInLRdual);
+						// storeBestLB(solx_numV_best_d, soly_numV_best_d, solu_d, sols_d, solx_best, soly_best, solu_best, sols_best, n);
+						storeBestLB(solx_numV_best_d, soly_numV_best_d, solx_best, soly_best, n);
 					}
 					else if (LBinGRB > profitForLB && LBinGRB > LB)
 					{
 						LB = LBinGRB;
 						cout << "===> During LR loop, find a better LB from LB_GRB =" << LBinGRB << endl;
-						storeBestLB(solx_GRB, soly_GRB, solu_GRB, sols_GRB, solx_best, soly_best,
-												solu_best, sols_best, n);
-						if (USE_LR_MULTIPLIER_TYPE_C)
-							updateLRmultiplierTypeC(soly_GRB, LR_lamda, &LR_miu, LR_u, LB,
-																			profitInLRdual);
+
+						// storeBestLB(solx_GRB, soly_GRB, solu_GRB, sols_GRB, solx_best, soly_best,solu_best, sols_best, n);
+						storeBestLB(solx_GRB, soly_GRB, solx_best, soly_best, n);
 					}
+					if (USE_LR_MULTIPLIER_TYPE_C)
+						updateLRmultiplierTypeC(soly_opt_d, LR_lamda, &LR_miu, LR_u, LB,
+																		profitInLRdual);
 
 					// if (USE_LR_MULTIPLIER_TYPE_B)
 					// 	updateLRmultiplierTypeB(soly_opt_d, LR_u, LR_rou, countItr, numArcs);
@@ -1423,606 +1495,608 @@ int main(int argc, char *argv[])
 					else
 						continue; // jump to the next iteration of while loop
 				}
-				// if there is request conflict, then call gurobi to find LB
-
-				//========================== calculate LB ========================//
-
-				// 1. If we found requests picked up by multiple vehicles
-				// for example, r_(i,j) picked up by multiple vehicles
-				// then we let y_(i,j) undecided
-				// 2. If r_(i,j) is picked up by only one vehicle, let y_(i,j)=1
-				// 3. force other y_(i,j)=0
-				// in this way, we try to reallocate the request
-
-				//==============start calling Gurobi===============
-
-				printf("===> start LB calculation <===\n");
-
-				int i, j, k, q;
-				int status, nSolutions;
-
-				GRBEnv *env = NULL;
-				// GRBVar x[n][n][numV];
-				// GRBVar y[n][n][numV];
-				GRBVar s[n][numV];
-				GRBVar u[n][n][n][numV];
-				GRBVar theta[n][n][numV];
-
-				GRBVar ***x = NULL;
-				GRBVar ***y = NULL;
-				x = new GRBVar **[n];
-				y = new GRBVar **[n];
-				for (i = 0; i < n; i++)
+				else
 				{
-					x[i] = new GRBVar *[n];
-					y[i] = new GRBVar *[n];
-					for (j = 0; j < n; j++)
+					// if there is request conflict, then call gurobi to find LB
+
+					//========================== calculate LB ========================//
+
+					// 1. If we found requests picked up by multiple vehicles
+					// for example, r_(i,j) picked up by multiple vehicles
+					// then we let y_(i,j) undecided
+					// 2. If r_(i,j) is picked up by only one vehicle, let y_(i,j)=1
+					// 3. force other y_(i,j)=0
+					// in this way, we try to reallocate the request
+
+					//==============start calling Gurobi===============
+
+					printf("===> start LB calculation <===\n");
+
+					int i, j, k, q;
+					int status, nSolutions;
+
+					GRBEnv *env = NULL;
+					// GRBVar x[n][n][numV];
+					// GRBVar y[n][n][numV];
+					GRBVar s[n][numV];
+					GRBVar u[n][n][n][numV];
+					GRBVar theta[n][n][numV];
+
+					GRBVar ***x = NULL;
+					GRBVar ***y = NULL;
+					x = new GRBVar **[n];
+					y = new GRBVar **[n];
+					for (i = 0; i < n; i++)
 					{
-						x[i][j] = new GRBVar[numV];
-						y[i][j] = new GRBVar[numV];
+						x[i] = new GRBVar *[n];
+						y[i] = new GRBVar *[n];
+						for (j = 0; j < n; j++)
+						{
+							x[i][j] = new GRBVar[numV];
+							y[i][j] = new GRBVar[numV];
+						}
 					}
-				}
 
-				try
-				{
-					env = new GRBEnv();
-					GRBModel model = GRBModel(*env);
-
-					// Create binary decision variables
-					for (q = 0; q < numV; q++)
+					try
 					{
-						for (i = 0; i < n; i++)
+						env = new GRBEnv();
+						GRBModel model = GRBModel(*env);
+
+						// Create binary decision variables
+						for (q = 0; q < numV; q++)
 						{
-							s[i][q] = model.addVar(0.0, n, 0.0, GRB_CONTINUOUS,
-																		 "s_" + itos(i) + "_" + itos(q));
-							for (j = 0; j < n; j++)
+							for (i = 0; i < n; i++)
 							{
-								x[i][j][q] = model.addVar(
-										0.0, 1.0, 0, GRB_BINARY,
-										"x_" + itos(i) + "_" + itos(j) + "_" + itos(q));
-								y[i][j][q] = model.addVar(
-										0.0, 1.0, 0, GRB_BINARY,
-										"y_" + itos(i) + "_" + itos(j) + "_" + itos(q));
-								theta[i][j][q] = model.addVar(
-										0.0,
-										GRB_INFINITY,
-										0.0,
-										GRB_CONTINUOUS,
-										"theta_" + itos(i) + "_" + itos(j) + "_" + itos(q));
-
-								for (k = 0; k < n; k++)
+								s[i][q] = model.addVar(0.0, n, 0.0, GRB_CONTINUOUS,
+																			 "s_" + itos(i) + "_" + itos(q));
+								for (j = 0; j < n; j++)
 								{
-									string s = "u_" + itos(i) + "_" + itos(j) + "_" + itos(k) + "_" + itos(q);
-									u[i][j][k][q] = model.addVar(0.0, GRB_INFINITY, 0.0,
-																							 GRB_CONTINUOUS, s);
-								}
-							}
-						}
+									x[i][j][q] = model.addVar(
+											0.0, 1.0, 0, GRB_BINARY,
+											"x_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+									y[i][j][q] = model.addVar(
+											0.0, 1.0, 0, GRB_BINARY,
+											"y_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+									theta[i][j][q] = model.addVar(
+											0.0,
+											GRB_INFINITY,
+											0.0,
+											GRB_CONTINUOUS,
+											"theta_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 
-						int ogn = origin[q];
-						for (i = 0; i < n; i++)
-						{
-							x[i][i][q].set(GRB_DoubleAttr_UB, 0);
-							y[i][i][q].set(GRB_DoubleAttr_UB, 0);
-							x[i][ogn][q].set(GRB_DoubleAttr_UB, 0);
-							y[i][ogn][q].set(GRB_DoubleAttr_UB, 0);
-							x[n - 1][i][q].set(GRB_DoubleAttr_UB, 0);
-							y[n - 1][i][q].set(GRB_DoubleAttr_UB, 0);
-							for (j = 0; j < n; j++)
-								if (wt[i][j] == 0)
-									y[i][j][q].set(GRB_DoubleAttr_UB, 0);
-						}
-
-						if (ADD_PREPROCESS)
-						{
-							for (int i = 0; i < n; i++)
-							{
-								vector<int> nbsTemp = allVehiclesInaccNeighbors[q][i];
-								for (j = 0; j < nbsTemp.size(); j++)
-								{
-									x[i][nbsTemp[j]][q].set(GRB_DoubleAttr_UB, 0);
-									// y[i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
 									for (k = 0; k < n; k++)
 									{
-										u[i][nbsTemp[j]][k][q].set(GRB_DoubleAttr_UB, 0);
-										u[i][k][nbsTemp[j]][q].set(GRB_DoubleAttr_UB, 0);
-										u[k][nbsTemp[j]][i][q].set(GRB_DoubleAttr_UB, 0);
+										string s = "u_" + itos(i) + "_" + itos(j) + "_" + itos(k) + "_" + itos(q);
+										u[i][j][k][q] = model.addVar(0.0, GRB_INFINITY, 0.0,
+																								 GRB_CONTINUOUS, s);
 									}
 								}
 							}
 
-							// int numViolatedTriples = 0;
-							for (int i = 0; i < n; i++)
-								if (i != ogn && i != endNode)
-									for (auto &k : allVehiclesNodeNeighbors[q][i])
-										for (auto &j : allVehiclesNodeNeighbors[q][k])
-											if (i != j)
-												if (dis[ogn][i] + dis[i][k] + dis[k][j] + dis[j][endNode] > disLimit)
-												{
-													u[i][j][k][q].set(GRB_DoubleAttr_UB, 0);
-													// numViolatedTriples++;
-												}
-							// cout << "numViolatedTriples=" << numViolatedTriples << endl;
+							int ogn = origin[q];
+							for (i = 0; i < n; i++)
+							{
+								x[i][i][q].set(GRB_DoubleAttr_UB, 0);
+								y[i][i][q].set(GRB_DoubleAttr_UB, 0);
+								x[i][ogn][q].set(GRB_DoubleAttr_UB, 0);
+								y[i][ogn][q].set(GRB_DoubleAttr_UB, 0);
+								x[n - 1][i][q].set(GRB_DoubleAttr_UB, 0);
+								y[n - 1][i][q].set(GRB_DoubleAttr_UB, 0);
+								for (j = 0; j < n; j++)
+									if (wt[i][j] == 0)
+										y[i][j][q].set(GRB_DoubleAttr_UB, 0);
+							}
+
+							if (ADD_PREPROCESS)
+							{
+								for (int i = 0; i < n; i++)
+								{
+									vector<int> nbsTemp = allVehiclesInaccNeighbors[q][i];
+									for (j = 0; j < nbsTemp.size(); j++)
+									{
+										x[i][nbsTemp[j]][q].set(GRB_DoubleAttr_UB, 0);
+										// y[i][nbsTemp[j]].set(GRB_DoubleAttr_UB, 0);
+										for (k = 0; k < n; k++)
+										{
+											u[i][nbsTemp[j]][k][q].set(GRB_DoubleAttr_UB, 0);
+											u[i][k][nbsTemp[j]][q].set(GRB_DoubleAttr_UB, 0);
+											u[k][nbsTemp[j]][i][q].set(GRB_DoubleAttr_UB, 0);
+										}
+									}
+								}
+
+								// int numViolatedTriples = 0;
+								for (int i = 0; i < n; i++)
+									if (i != ogn && i != endNode)
+										for (auto &k : allVehiclesNodeNeighbors[q][i])
+											for (auto &j : allVehiclesNodeNeighbors[q][k])
+												if (i != j)
+													if (dis[ogn][i] + dis[i][k] + dis[k][j] + dis[j][endNode] > disLimit)
+													{
+														u[i][j][k][q].set(GRB_DoubleAttr_UB, 0);
+														// numViolatedTriples++;
+													}
+								// cout << "numViolatedTriples=" << numViolatedTriples << endl;
+							}
 						}
-					}
 
-					int arcCandidates[n][n][numV];
-					for (q = 0; q < numV; q++)
-						for (i = 0; i < n; i++)
-							for (j = 0; j < n; j++)
-								arcCandidates[i][j][q] = 0;
-
-					if (ADD_POTENTIAL_ARCS)
-					{
-						//===> preset all y vars LB and UB
-						//===> if cargo (i,j) is picked up multiple times,
-						// select node x so that (i,x) and (x,j) is within distance limit and weight limit
-						// if cargo (h,i) is not accepeted, (j,k) accepted, then also consider (h,x),(x,j)
-						// if cargo (j,k) is not accepeted, (h,i) accepted, then also consier (i,x),(x,k)
-						// if (h,i) (j,k) are not accepted, also consier (h,x),(x,k)
-
-						vector<double> distSumTemp; // temp: temparoray use
-
+						int arcCandidates[n][n][numV];
 						for (q = 0; q < numV; q++)
-							distSumTemp.push_back(0);
+							for (i = 0; i < n; i++)
+								for (j = 0; j < n; j++)
+									arcCandidates[i][j][q] = 0;
+
+						if (ADD_POTENTIAL_ARCS)
+						{
+							//===> preset all y vars LB and UB
+							//===> if cargo (i,j) is picked up multiple times,
+							// select node x so that (i,x) and (x,j) is within distance limit and weight limit
+							// if cargo (h,i) is not accepeted, (j,k) accepted, then also consider (h,x),(x,j)
+							// if cargo (j,k) is not accepeted, (h,i) accepted, then also consier (i,x),(x,k)
+							// if (h,i) (j,k) are not accepted, also consier (h,x),(x,k)
+
+							vector<double> distSumTemp; // temp: temparoray use
+
+							for (q = 0; q < numV; q++)
+								distSumTemp.push_back(0);
+
+							for (q = 0; q < numV; q++)
+								for (i = 0; i < n; i++)
+									for (j = 0; j < n; j++)
+									{
+										arcCandidates[i][j][q] = 0;
+										distSumTemp[q] += dis[i][j] * solx_numV_best_d[i][j][q];
+									}
+
+							for (int q1 = 0; q1 < numV - 1; q1++)
+								for (int q2 = q1 + 1; q2 < numV; q2++)
+									for (i = 0; i < n; i++)
+										for (j = 0; j < n; j++)
+										{
+
+											vector<int> startNodesSet;
+											vector<int> endNodesSet;
+											if (soly_numV_best_d[i][j][q1] + soly_numV_best_d[i][j][q2] > 1.9) // if there is conflict
+											{
+												startNodesSet.push_back(i);
+												endNodesSet.push_back(j);
+
+												vector<double> availDist = {disLimit - distSumTemp[q1] + dis[i][j], disLimit - distSumTemp[q2] + dis[i][j]};
+
+												vector<int> vehiclesTemp = {q1, q2};
+
+												// for (auto &vehTemp : vehiclesTemp)
+												for (int vehIndex = 0; vehIndex < vehiclesTemp.size(); vehIndex++)
+												{
+													int vehTemp = vehiclesTemp[vehIndex];
+													for (int k = 0; k < n; k++)
+														if (solx_numV_best_d[k][i][vehTemp] > 0.9)
+															if (soly_numV_best_d[k][i][vehTemp] < 0.1) // if the previous visited arc is not an accepted cargo
+															{
+																startNodesSet.push_back(k);
+																availDist[vehIndex] = availDist[vehIndex] + dis[k][i];
+															}
+
+													for (int k = 0; k < n; k++)
+														if (solx_numV_best_d[j][k][vehTemp] > 0.9)
+															if (soly_numV_best_d[j][k][vehTemp] < 0.1)
+															{
+																endNodesSet.push_back(k);
+																availDist[vehIndex] = availDist[vehIndex] + dis[j][k];
+															}
+
+													for (auto &k1 : startNodesSet)
+														for (auto &k2 : endNodesSet)
+															for (int k3 = 0; k3 < n; k3++)
+																if (dis[k1][k3] + dis[k3][k2] <= availDist[vehTemp])
+																{
+																	arcCandidates[k1][k3][vehTemp] = 1;
+																	arcCandidates[k3][k2][vehTemp] = 1;
+																}
+												}
+											}
+										}
+
+							// for (q = 0; q < numV; q++)
+							// {
+							// 	cout << "vehicle " << q + 1 << endl;
+							// 	for (i = 0; i < n; i++)
+							// 		for (j = 0; j < n; j++)
+							// 			if (arcCandidates[i][j][q] > 0.9)
+							// 				printf("%d-%d, ", i + 1, j + 1);
+							// 	cout << endl;
+							// }
+
+							// if a node has no cargos in or out, then it won't be visited
+
+							for (q = 0; q < numV; q++)
+							{
+								int ogn = origin[q];
+								for (i = 0; i < n - 1; i++)
+								{
+									if (i == ogn)
+										continue;
+
+									int sumY = 0;
+									for (j = 0; j < n; j++)
+									{
+										sumY += soly_numV_best_d[i][j][q] + soly_numV_best_d[j][i][q];
+										sumY += selectedPositiveProfitCargos[i][j] + selectedPositiveProfitCargos[j][i];
+										sumY += arcCandidates[i][j][q] + arcCandidates[j][i][q];
+									}
+									if (sumY < 0.1)
+										for (j = 0; j < n; j++)
+										{
+											x[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
+											x[j][i][q].set(GRB_DoubleAttr_UB, 0.0);
+										}
+								}
+							}
+						}
 
 						for (q = 0; q < numV; q++)
 							for (i = 0; i < n; i++)
 								for (j = 0; j < n; j++)
 								{
-									arcCandidates[i][j][q] = 0;
-									distSumTemp[q] += dis[i][j] * solx_numV_best_d[i][j][q];
-								}
-
-						for (int q1 = 0; q1 < numV - 1; q1++)
-							for (int q2 = q1 + 1; q2 < numV; q2++)
-								for (i = 0; i < n; i++)
-									for (j = 0; j < n; j++)
-									{
-
-										vector<int> startNodesSet;
-										vector<int> endNodesSet;
-										if (soly_numV_best_d[i][j][q1] + soly_numV_best_d[i][j][q2] > 1.9) // if there is conflict
+									//  if (soly_numV_best_d[i][j][q] > 0.9)
+									//  {
+									//  y[i][j][q].set (GRB_DoubleAttr_ScenNLB, 1.0);
+									//  y[i][j][q].set (GRB_DoubleAttr_ScenNUB, 1.0);
+									//  }
+									//  else
+									// use numV best solution from solving single vehicle problem above
+									// as the guide for calculating LB
+									// if ADD_POTENTIAL_ARCS is false, selectedPositiveProfitCargos[i][j] is all zeros
+									if (soly_numV_best_d[i][j][q] < 0.1 && selectedPositiveProfitCargos[i][j] < 0.1) // if the cargo is not selected in LR dual, then do not consider them in MVBPMP
+									{																																								 // defaul arcCandidates are all zeros
+										if (arcCandidates[i][j][q] < 0.1)																							 // if arcCandidates[i][j]==1, it means y[i][j]can be considered in model, so no need to set it to be zero
 										{
-											startNodesSet.push_back(i);
-											endNodesSet.push_back(j);
-
-											vector<double> availDist = {disLimit - distSumTemp[q1] + dis[i][j], disLimit - distSumTemp[q2] + dis[i][j]};
-
-											vector<int> vehiclesTemp = {q1, q2};
-
-											// for (auto &vehTemp : vehiclesTemp)
-											for (int vehIndex = 0; vehIndex < vehiclesTemp.size(); vehIndex++)
-											{
-												int vehTemp = vehiclesTemp[vehIndex];
-												for (int k = 0; k < n; k++)
-													if (solx_numV_best_d[k][i][vehTemp] > 0.9)
-														if (soly_numV_best_d[k][i][vehTemp] < 0.1) // if the previous visited arc is not an accepted cargo
-														{
-															startNodesSet.push_back(k);
-															availDist[vehIndex] = availDist[vehIndex] + dis[k][i];
-														}
-
-												for (int k = 0; k < n; k++)
-													if (solx_numV_best_d[j][k][vehTemp] > 0.9)
-														if (soly_numV_best_d[j][k][vehTemp] < 0.1)
-														{
-															endNodesSet.push_back(k);
-															availDist[vehIndex] = availDist[vehIndex] + dis[j][k];
-														}
-
-												for (auto &k1 : startNodesSet)
-													for (auto &k2 : endNodesSet)
-														for (int k3 = 0; k3 < n; k3++)
-															if (dis[k1][k3] + dis[k3][k2] <= availDist[vehTemp])
-															{
-																arcCandidates[k1][k3][vehTemp] = 1;
-																arcCandidates[k3][k2][vehTemp] = 1;
-															}
-											}
+											y[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
 										}
 									}
+								}
 
-						// for (q = 0; q < numV; q++)
-						// {
-						// 	cout << "vehicle " << q + 1 << endl;
-						// 	for (i = 0; i < n; i++)
-						// 		for (j = 0; j < n; j++)
-						// 			if (arcCandidates[i][j][q] > 0.9)
-						// 				printf("%d-%d, ", i + 1, j + 1);
-						// 	cout << endl;
-						// }
-
-						// if a node has no cargos in or out, then it won't be visited
+						// set up constraints
+						GRBConstr *vehOriginConstr = 0;
+						GRBConstr *vehDestConstr = 0;
+						vehOriginConstr = new GRBConstr[numV];
+						vehDestConstr = new GRBConstr[numV];
 
 						for (q = 0; q < numV; q++)
 						{
 							int ogn = origin[q];
-							for (i = 0; i < n - 1; i++)
-							{
-								if (i == ogn)
-									continue;
 
-								int sumY = 0;
+							// vehicle goes out of origins
+							GRBLinExpr expr1 = 0.0;
+							for (i = 0; i < n; i++)
+								expr1 += x[ogn][i][q];
+
+							// model.addConstr (expr1 == 1, "origin_" + itos (q));
+							vehOriginConstr[q] = model.addConstr(expr1 == 1,
+																									 "origin_" + itos(q));
+
+							// vehicle goes back to node n
+							GRBLinExpr expr2 = 0.0;
+							for (i = 0; i < n - 1; i++)
+								expr2 += x[i][n - 1][q];
+							// model.addConstr (expr2 == 1, "destination_" + itos (q));
+							vehDestConstr[q] = model.addConstr(expr2 == 1,
+																								 "destination_" + itos(q));
+
+							// flow conservation
+							for (int k = 0; k < n - 1; k++)
+							{
+								if (k != ogn)
+								{
+									GRBLinExpr expr = 0;
+									for (i = 0; i < n - 1; i++)
+										expr += x[i][k][q];
+
+									// BE CAREFUL!
+									// I used j=1 to start which exclues node 0
+									// which cause that the optimal profit is lower!
+									for (j = 0; j < n; j++)
+										expr -= x[k][j][q];
+									model.addConstr(
+											expr == 0,
+											"flow_conservation_" + itos(k) + "_" + itos(q));
+								}
+							}
+
+							// distance
+							GRBLinExpr expr3 = 0.0;
+							for (i = 0; i < n - 1; i++)
+								for (j = 0; j < n; j++)
+									expr3 += dis[i][j] * x[i][j][q];
+							model.addConstr(expr3 <= route.DIS, "distance_" + itos(q));
+
+							// node degree less than 1
+							for (int j = 0; j < n - 1; j++)
+							{
+								GRBLinExpr expr = 0.0;
+								for (i = 0; i < n - 1; i++)
+									expr += x[i][j][q];
+								model.addConstr(expr <= 1,
+																"indegree_" + itos(j) + "_" + itos(q));
+							}
+
+							// subtour elimination
+							for (i = 0; i < n - 1; i++)
 								for (j = 0; j < n; j++)
 								{
-									sumY += soly_numV_best_d[i][j][q] + soly_numV_best_d[j][i][q];
-									sumY += selectedPositiveProfitCargos[i][j] + selectedPositiveProfitCargos[j][i];
-									sumY += arcCandidates[i][j][q] + arcCandidates[j][i][q];
+									GRBLinExpr expr = 0.0;
+									expr += s[i][q] - s[j][q] + (n - 1) * x[i][j][q] + (n - 3) * x[j][i][q];
+									model.addConstr(
+											expr <= n - 2,
+											"subtour_" + itos(i) + "_" + itos(j) + "_" + itos(q));
 								}
-								if (sumY < 0.1)
+
+							// arc flow
+							for (i = 0; i < n - 1; i++)
+								for (j = 0; j < n; j++)
+								{
+									GRBLinExpr expr = 0.0;
+
+									expr += wt[i][j] * y[i][j][q] - theta[i][j][q];
+									for (k = 0; k < n - 1; k++)
+									{
+										if (k != ogn)
+											expr += u[i][k][j][q] + u[k][j][i][q] - u[i][j][k][q];
+										else
+											expr += u[k][j][i][q];
+									}
+									// when k==n-1
+									if (j != n - 1)
+										expr += u[i][n - 1][j][q];
+									model.addConstr(
+											expr == 0,
+											"flow_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+
+									/*
+									 expr += wt[i][j] * y[i][j][q] - theta[i][j][q];
+									 for (k = 0; k < n; k++)
+									 expr += u[i][k][j][q] + u[k][j][i][q] - u[i][j][k][q];
+									 */
+								}
+
+							// arc flow upperbound
+							for (i = 0; i < n - 1; i++)
+								for (j = 0; j < n; j++)
+								{
+									GRBLinExpr expr = 0.0;
+									expr += theta[i][j][q] - Q * x[i][j][q];
+									model.addConstr(
+											expr <= 0,
+											"flowBound_" + itos(i) + "_" + itos(j) + "_" + itos(q));
+								}
+						}
+
+						// one vehicle for one cargo
+						// if (!ADD_CUTS){}
+						for (i = 0; i < n - 1; i++)
+							for (j = 0; j < n; j++)
+							{
+								GRBLinExpr expr = 0.0;
+								for (q = 0; q < numV; q++)
+									expr += y[i][j][q];
+								model.addConstr(expr <= 1,
+																"one-one" + itos(i) + "_" + itos(j));
+							}
+
+						// set up objective
+						GRBLinExpr obj = 0.0;
+						for (q = 0; q < numV; q++)
+						{
+							for (i = 0; i < n - 1; i++)
+								for (j = 0; j < n; j++)
+								{
+									obj += price * dis[i][j] * wt[i][j] * y[i][j][q];
+									obj -= cost * dis[i][j] * theta[i][j][q];
+									obj -= cost * vw * dis[i][j] * x[i][j][q];
+								}
+						}
+
+						model.setObjective(obj, GRB_MAXIMIZE);
+
+						model.set(GRB_IntParam_OutputFlag, 0);
+
+						// Optimize model
+						model.optimize();
+
+						// write model to file
+						// model.write ("MVBPMP.lp");
+
+						// Status checking
+						status = model.get(GRB_IntAttr_Status);
+						if (status == GRB_INF_OR_UNBD || status == GRB_INFEASIBLE || status == GRB_UNBOUNDED)
+						{
+							cout << "The model cannot be solved "
+									 << "because it is infeasible or unbounded" << endl;
+							// return 1;
+							exit(1);
+						}
+						if (status != GRB_OPTIMAL)
+						{
+							cout << "Optimization was stopped with status " << status << endl;
+							exit(1);
+							// return 1;
+						}
+
+						//=====================> READ SOLUTION FROM GUROBI <============================
+						// Extract solution
+						if (model.get(GRB_IntAttr_SolCount) > 0)
+						{
+
+							double runtime = model.get(GRB_DoubleAttr_Runtime);
+							cout << "LBcalculationInLRLoopRuntime: " << runtime << " seconds" << endl;
+
+							double objtemp = model.get(GRB_DoubleAttr_ObjVal);
+							cout << "OBJ: " << objtemp << endl;
+							// update LB
+							bool findBetterLB = false;
+							if (objtemp > LB)
+							{
+								LB = objtemp;
+								cout << "LB is updated." << endl;
+								findBetterLB = true;
+							}
+
+							cout << "===> LB = " << LB << endl;
+
+							//====== start defining solutions for x, y, u, and s ======
+							double ***solx = new double **[n]; // solution x for LR dual
+							double ***soly = new double **[n];
+							double ****solu = new double ***[n];
+							double **sols = new double *[n];
+
+							for (int i = 0; i < n; i++)
+							{
+								solx[i] = new double *[n];
+								soly[i] = new double *[n];
+								solu[i] = new double **[n];
+								sols[i] = new double[numV];
+
+								for (int j = 0; j < n; j++)
+								{
+									solx[i][j] = new double[numV];
+									soly[i][j] = new double[numV];
+									solu[i][j] = new double *[n];
+
+									for (int k = 0; k < n; k++)
+										solu[i][j][k] = new double[numV];
+								}
+							}
+
+							//====== start reading solutions for x, y, u, and s ======
+							// solx[i][j] = model.get (GRB_DoubleAttr_X, x[i][j],numV);
+							// soly[i][j] = model.get (GRB_DoubleAttr_X, y[i][j],numV);
+							for (q = 0; q < numV; q++)
+								for (i = 0; i < n; i++)
+								{
+									sols[i][q] = s[i][q].get(GRB_DoubleAttr_X);
 									for (j = 0; j < n; j++)
 									{
-										x[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
-										x[j][i][q].set(GRB_DoubleAttr_UB, 0.0);
+										solx[i][j][q] = x[i][j][q].get(GRB_DoubleAttr_X);
+										soly[i][j][q] = y[i][j][q].get(GRB_DoubleAttr_X);
+										for (k = 0; k < n; k++)
+											solu[i][j][k][q] = u[i][j][k][q].get(
+													GRB_DoubleAttr_X);
 									}
-							}
-						}
-					}
+								}
 
-					for (q = 0; q < numV; q++)
-						for (i = 0; i < n; i++)
-							for (j = 0; j < n; j++)
-							{
-								//  if (soly_numV_best_d[i][j][q] > 0.9)
-								//  {
-								//  y[i][j][q].set (GRB_DoubleAttr_ScenNLB, 1.0);
-								//  y[i][j][q].set (GRB_DoubleAttr_ScenNUB, 1.0);
-								//  }
-								//  else
-								// use numV best solution from solving single vehicle problem above
-								// as the guide for calculating LB
-								// if ADD_POTENTIAL_ARCS is false, selectedPositiveProfitCargos[i][j] is all zeros
-								if (soly_numV_best_d[i][j][q] < 0.1 && selectedPositiveProfitCargos[i][j] < 0.1) // if the cargo is not selected in LR dual, then do not consider them in MVBPMP
-								{																																								 // defaul arcCandidates are all zeros
-									if (arcCandidates[i][j][q] < 0.1)																							 // if arcCandidates[i][j]==1, it means y[i][j]can be considered in model, so no need to set it to be zero
+							// store the solution as the best LB
+							if (findBetterLB)
+								// storeBestLB(solx, soly, solu, sols, solx_best, soly_best,solu_best, sols_best, n);
+								storeBestLB(solx, soly, solx_best, soly_best, n);
+
+							printf("Selected arcs: \n");
+							for (q = 0; q < numV; q++)
+								for (i = 0; i < n; i++)
+									for (j = 0; j < n; j++)
 									{
-										y[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
+										if (solx[i][j][q] > 0.9)
+											printf("%d -- %d (%d)\n", i + 1, j + 1, q + 1);
 									}
-								}
-							}
 
-					// set up constraints
-					GRBConstr *vehOriginConstr = 0;
-					GRBConstr *vehDestConstr = 0;
-					vehOriginConstr = new GRBConstr[numV];
-					vehDestConstr = new GRBConstr[numV];
+							printf("Selected requests: \n");
+							for (q = 0; q < numV; q++)
+								for (i = 0; i < n; i++)
+									for (j = 0; j < n; j++)
+									{
+										if (soly[i][j][q] > 0.9)
+											printf("%d -- %d (%d)\n", i + 1, j + 1, q + 1);
+									}
 
-					for (q = 0; q < numV; q++)
-					{
-						int ogn = origin[q];
-
-						// vehicle goes out of origins
-						GRBLinExpr expr1 = 0.0;
-						for (i = 0; i < n; i++)
-							expr1 += x[ogn][i][q];
-
-						// model.addConstr (expr1 == 1, "origin_" + itos (q));
-						vehOriginConstr[q] = model.addConstr(expr1 == 1,
-																								 "origin_" + itos(q));
-
-						// vehicle goes back to node n
-						GRBLinExpr expr2 = 0.0;
-						for (i = 0; i < n - 1; i++)
-							expr2 += x[i][n - 1][q];
-						// model.addConstr (expr2 == 1, "destination_" + itos (q));
-						vehDestConstr[q] = model.addConstr(expr2 == 1,
-																							 "destination_" + itos(q));
-
-						// flow conservation
-						for (int k = 0; k < n - 1; k++)
-						{
-							if (k != ogn)
+							for (i = 0; i < n; i++)
 							{
-								GRBLinExpr expr = 0;
-								for (i = 0; i < n - 1; i++)
-									expr += x[i][k][q];
-
-								// BE CAREFUL!
-								// I used j=1 to start which exclues node 0
-								// which cause that the optimal profit is lower!
 								for (j = 0; j < n; j++)
-									expr -= x[k][j][q];
-								model.addConstr(
-										expr == 0,
-										"flow_conservation_" + itos(k) + "_" + itos(q));
-							}
-						}
-
-						// distance
-						GRBLinExpr expr3 = 0.0;
-						for (i = 0; i < n - 1; i++)
-							for (j = 0; j < n; j++)
-								expr3 += dis[i][j] * x[i][j][q];
-						model.addConstr(expr3 <= route.DIS, "distance_" + itos(q));
-
-						// node degree less than 1
-						for (int j = 0; j < n - 1; j++)
-						{
-							GRBLinExpr expr = 0.0;
-							for (i = 0; i < n - 1; i++)
-								expr += x[i][j][q];
-							model.addConstr(expr <= 1,
-															"indegree_" + itos(j) + "_" + itos(q));
-						}
-
-						// subtour elimination
-						for (i = 0; i < n - 1; i++)
-							for (j = 0; j < n; j++)
-							{
-								GRBLinExpr expr = 0.0;
-								expr += s[i][q] - s[j][q] + (n - 1) * x[i][j][q] + (n - 3) * x[j][i][q];
-								model.addConstr(
-										expr <= n - 2,
-										"subtour_" + itos(i) + "_" + itos(j) + "_" + itos(q));
-							}
-
-						// arc flow
-						for (i = 0; i < n - 1; i++)
-							for (j = 0; j < n; j++)
-							{
-								GRBLinExpr expr = 0.0;
-
-								expr += wt[i][j] * y[i][j][q] - theta[i][j][q];
-								for (k = 0; k < n - 1; k++)
 								{
-									if (k != ogn)
-										expr += u[i][k][j][q] + u[k][j][i][q] - u[i][j][k][q];
-									else
-										expr += u[k][j][i][q];
+									for (k = 0; k < n; k++)
+										delete[] solu[i][j][k];
+
+									delete[] solx[i][j];
+									delete[] soly[i][j];
+									delete[] solu[i][j];
 								}
-								// when k==n-1
-								if (j != n - 1)
-									expr += u[i][n - 1][j][q];
-								model.addConstr(
-										expr == 0,
-										"flow_" + itos(i) + "_" + itos(j) + "_" + itos(q));
-
-								/*
-								 expr += wt[i][j] * y[i][j][q] - theta[i][j][q];
-								 for (k = 0; k < n; k++)
-								 expr += u[i][k][j][q] + u[k][j][i][q] - u[i][j][k][q];
-								 */
+								delete[] solx[i];
+								delete[] soly[i];
+								delete[] solu[i];
+								delete[] sols[i];
 							}
-
-						// arc flow upperbound
-						for (i = 0; i < n - 1; i++)
-							for (j = 0; j < n; j++)
-							{
-								GRBLinExpr expr = 0.0;
-								expr += theta[i][j][q] - Q * x[i][j][q];
-								model.addConstr(
-										expr <= 0,
-										"flowBound_" + itos(i) + "_" + itos(j) + "_" + itos(q));
-							}
+							delete[] solx;
+							delete[] soly;
+							delete[] solu;
+							delete[] sols;
+						}
 					}
-
-					// one vehicle for one cargo
-					// if (!ADD_CUTS){}
-					for (i = 0; i < n - 1; i++)
+					catch (GRBException e)
+					{
+						cout << "Error number: " << e.getErrorCode() << endl;
+						cout << e.getMessage() << endl;
+					}
+					catch (...)
+					{
+						cout << "Error during optimization" << endl;
+					}
+					for (i = 0; i < n; i++)
+					{
 						for (j = 0; j < n; j++)
 						{
-							GRBLinExpr expr = 0.0;
-							for (q = 0; q < numV; q++)
-								expr += y[i][j][q];
-							model.addConstr(expr <= 1,
-															"one-one" + itos(i) + "_" + itos(j));
+							delete[] x[i][j];
+							delete[] y[i][j];
 						}
+						delete[] x[i];
+						delete[] y[i];
+					}
+					delete[] x;
+					delete[] y;
+					delete env;
 
-					// set up objective
-					GRBLinExpr obj = 0.0;
-					for (q = 0; q < numV; q++)
+					// if (USE_LR_MULTIPLIER_TYPE_B)
+					// 	updateLRmultiplierTypeB(soly_opt_d, LR_u, LR_rou, countItr, numArcs);
+
+					double LR_miu;
+
+					// if (USE_LR_MULTIPLIER_TYPE_C)
+					// 	updateLRmultiplierTypeC(soly_opt_d, LR_lamda, &LR_miu, LR_u, LB,
+					// 													profitInLRdual);
+
+					// add comparison to LB_GRB
+					if (LBinGRB > LB)
 					{
-						for (i = 0; i < n - 1; i++)
-							for (j = 0; j < n; j++)
-							{
-								obj += price * dis[i][j] * wt[i][j] * y[i][j][q];
-								obj -= cost * dis[i][j] * theta[i][j][q];
-								obj -= cost * vw * dis[i][j] * x[i][j][q];
-							}
+						LB = LBinGRB;
+						// cout print 4.834166 to 4.83417. So I use printf to print more digits
+						//  cout << "===> When calculating LB in LR loop, find a better LB from LB_GRB = " << LBinGRB << endl;
+						printf("===> When calculating LB in LR loop, find a better LB from LB_GRB = %lf\n", LBinGRB);
+						// storeBestLB(solx_GRB, soly_GRB, solu_GRB, sols_GRB, solx_best, soly_best, solu_best, sols_best, n);
+						storeBestLB(solx_GRB, soly_GRB, solx_best, soly_best, n);
+					}
+					if (USE_LR_MULTIPLIER_TYPE_C)
+						updateLRmultiplierTypeC(soly_opt_d, LR_lamda, &LR_miu, LR_u, LB,
+																		profitInLRdual);
+
+					if (LR_miu <= LR_miu_tolerance)
+					{
+						cout << "=== will stop loop because LR_miu < LR_miu_tolerance "
+								 << LR_miu_tolerance << endl;
+						break;
 					}
 
-					model.setObjective(obj, GRB_MAXIMIZE);
-
-					model.set(GRB_IntParam_OutputFlag, 0);
-
-					// Optimize model
-					model.optimize();
-
-					// write model to file
-					// model.write ("MVBPMP.lp");
-
-					// Status checking
-					status = model.get(GRB_IntAttr_Status);
-					if (status == GRB_INF_OR_UNBD || status == GRB_INFEASIBLE || status == GRB_UNBOUNDED)
+					if (UB > UBinGRB)
 					{
-						cout << "The model cannot be solved "
-								 << "because it is infeasible or unbounded" << endl;
-						// return 1;
-						exit(1);
-					}
-					if (status != GRB_OPTIMAL)
-					{
-						cout << "Optimization was stopped with status " << status << endl;
-						exit(1);
-						// return 1;
+						UB = UBinGRB;
+						printf("===> UBinGRB = %lf is a better upper bound\n", UBinGRB);
 					}
 
-					//=====================> READ SOLUTION FROM GUROBI <============================
-					// Extract solution
-					if (model.get(GRB_IntAttr_SolCount) > 0)
-					{
+					printf("===> LB UB gap = %lf \n", (UB - LB) / UB);
+					if ((UB - LB) / UB <= LR_gap_tolerance)
+						cout << "=== will stop loop because gap < LR_gap_toleranc "
+								 << LR_gap_tolerance << endl;
 
-						double runtime = model.get(GRB_DoubleAttr_Runtime);
-						cout << "LBcalculationInLRLoopRuntime: " << runtime << " seconds" << endl;
-
-						double objtemp = model.get(GRB_DoubleAttr_ObjVal);
-						cout << "OBJ: " << objtemp << endl;
-						// update LB
-						bool findBetterLB = false;
-						if (objtemp > LB)
-						{
-							LB = objtemp;
-							cout << "LB is updated." << endl;
-							findBetterLB = true;
-						}
-
-						cout << "===> LB = " << LB << endl;
-
-						//====== start defining solutions for x, y, u, and s ======
-						double ***solx = new double **[n]; // solution x for LR dual
-						double ***soly = new double **[n];
-						double ****solu = new double ***[n];
-						double **sols = new double *[n];
-
-						for (int i = 0; i < n; i++)
-						{
-							solx[i] = new double *[n];
-							soly[i] = new double *[n];
-							solu[i] = new double **[n];
-							sols[i] = new double[numV];
-
-							for (int j = 0; j < n; j++)
-							{
-								solx[i][j] = new double[numV];
-								soly[i][j] = new double[numV];
-								solu[i][j] = new double *[n];
-
-								for (int k = 0; k < n; k++)
-									solu[i][j][k] = new double[numV];
-							}
-						}
-
-						//====== start reading solutions for x, y, u, and s ======
-						// solx[i][j] = model.get (GRB_DoubleAttr_X, x[i][j],numV);
-						// soly[i][j] = model.get (GRB_DoubleAttr_X, y[i][j],numV);
-						for (q = 0; q < numV; q++)
-							for (i = 0; i < n; i++)
-							{
-								sols[i][q] = s[i][q].get(GRB_DoubleAttr_X);
-								for (j = 0; j < n; j++)
-								{
-									solx[i][j][q] = x[i][j][q].get(GRB_DoubleAttr_X);
-									soly[i][j][q] = y[i][j][q].get(GRB_DoubleAttr_X);
-									for (k = 0; k < n; k++)
-										solu[i][j][k][q] = u[i][j][k][q].get(
-												GRB_DoubleAttr_X);
-								}
-							}
-
-						// store the solution as the best LB
-						if (findBetterLB)
-							storeBestLB(solx, soly, solu, sols, solx_best, soly_best,
-													solu_best, sols_best, n);
-
-						printf("Selected arcs: \n");
-						for (q = 0; q < numV; q++)
-							for (i = 0; i < n; i++)
-								for (j = 0; j < n; j++)
-								{
-									if (solx[i][j][q] > 0.9)
-										printf("%d -- %d (%d)\n", i + 1, j + 1, q + 1);
-								}
-
-						printf("Selected requests: \n");
-						for (q = 0; q < numV; q++)
-							for (i = 0; i < n; i++)
-								for (j = 0; j < n; j++)
-								{
-									if (soly[i][j][q] > 0.9)
-										printf("%d -- %d (%d)\n", i + 1, j + 1, q + 1);
-								}
-
-						for (i = 0; i < n; i++)
-						{
-							for (j = 0; j < n; j++)
-							{
-								for (k = 0; k < n; k++)
-									delete[] solu[i][j][k];
-
-								delete[] solx[i][j];
-								delete[] soly[i][j];
-								delete[] solu[i][j];
-							}
-							delete[] solx[i];
-							delete[] soly[i];
-							delete[] solu[i];
-							delete[] sols[i];
-						}
-						delete[] solx;
-						delete[] soly;
-						delete[] solu;
-						delete[] sols;
-					}
+					reportTime(endTimeOfLastIteration, endTimeOfLastIterationWallClock);
+					endTimeOfLastIteration = clock();
+					endTimeOfLastIterationWallClock = high_resolution_clock::now();
 				}
-				catch (GRBException e)
-				{
-					cout << "Error number: " << e.getErrorCode() << endl;
-					cout << e.getMessage() << endl;
-				}
-				catch (...)
-				{
-					cout << "Error during optimization" << endl;
-				}
-				for (i = 0; i < n; i++)
-				{
-					for (j = 0; j < n; j++)
-					{
-						delete[] x[i][j];
-						delete[] y[i][j];
-					}
-					delete[] x[i];
-					delete[] y[i];
-				}
-				delete[] x;
-				delete[] y;
-				delete env;
-
-				// if (USE_LR_MULTIPLIER_TYPE_B)
-				// 	updateLRmultiplierTypeB(soly_opt_d, LR_u, LR_rou, countItr, numArcs);
-
-				double LR_miu;
-
-				// if (USE_LR_MULTIPLIER_TYPE_C)
-				// 	updateLRmultiplierTypeC(soly_opt_d, LR_lamda, &LR_miu, LR_u, LB,
-				// 													profitInLRdual);
-
-				// add comparison to LB_GRB
-				if (LBinGRB > LB)
-				{
-					LB = LBinGRB;
-					// cout print 4.834166 to 4.83417. So I use printf to print more digits
-					//  cout << "===> When calculating LB in LR loop, find a better LB from LB_GRB = " << LBinGRB << endl;
-					printf("===> When calculating LB in LR loop, find a better LB from LB_GRB = %lf\n", LBinGRB);
-					storeBestLB(solx_GRB, soly_GRB, solu_GRB, sols_GRB, solx_best, soly_best,
-											solu_best, sols_best, n);
-				}
-				if (USE_LR_MULTIPLIER_TYPE_C)
-					updateLRmultiplierTypeC(soly_opt_d, LR_lamda, &LR_miu, LR_u, LB,
-																	profitInLRdual);
-
-				if (LR_miu <= LR_miu_tolerance)
-				{
-					cout << "=== will stop loop because LR_miu < LR_miu_tolerance "
-							 << LR_miu_tolerance << endl;
-					break;
-				}
-
-				if (UB > UBinGRB)
-				{
-					UB = UBinGRB;
-					printf("===> UBinGRB = %lf is a better upper bound\n", UBinGRB);
-				}
-
-				printf("===> LB UB gap = %lf \n", (UB - LB) / UB);
-				if ((UB - LB) / UB <= LR_gap_tolerance)
-					cout << "=== will stop loop because gap < LR_gap_toleranc "
-							 << LR_gap_tolerance << endl;
-
-				reportTime(endTimeOfLastIteration, endTimeOfLastIterationWallClock);
-				endTimeOfLastIteration = clock();
-				endTimeOfLastIterationWallClock = high_resolution_clock::now();
-
 			} // end of while loop
 
 			for (int i = 0; i < n; i++)
