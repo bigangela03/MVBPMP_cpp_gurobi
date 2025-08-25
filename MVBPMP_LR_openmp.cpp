@@ -71,6 +71,19 @@ itos(int i)
 	return s.str();
 }
 
+struct Cargo
+{
+	int origin;
+	int end;
+	double potentialProfit;
+};
+
+// Custom comparison function to sort by profit in descending order
+bool compareCargoByProfit(const Cargo &a, const Cargo &b)
+{
+	return a.potentialProfit > b.potentialProfit; // Sorts in descending order of age
+}
+
 void updateLRmultiplierTypeC(double ***, double, double *, double **, double, double);
 void printVar(double ***, double ***, double ****, int *);
 void updateLRmultiplierTypeB(double ***, double **, double, int, int);
@@ -550,7 +563,9 @@ int main(int argc, char *argv[])
 	beginTime = clock();
 
 	endTimeOfLastIterationWallClock = high_resolution_clock::now();
-	while ((UB - LB) / UB > LR_gap_tolerance)
+	// while ((UB - LB) / UB > LR_gap_tolerance)
+	while (((UB - LB) / LB > LR_gap_tolerance) || ((UB - LB) / LB < -LR_gap_tolerance))
+
 	{
 		auto endWallClock = high_resolution_clock::now();
 		auto elapsedWallClock = duration_cast<std::chrono::nanoseconds>(endWallClock - beginWallClock);
@@ -1034,10 +1049,12 @@ int main(int argc, char *argv[])
 				exit(1);
 			}
 
-			if ((UB - LB) / UB <= LR_gap_tolerance)
+			// if ((UB - LB) / UB <= LR_gap_tolerance)
+			if (((UB - LB) / LB > LR_gap_tolerance) || ((UB - LB) / LB < -LR_gap_tolerance))
+
 			{
-				cout << "=== will stop loop because gap " << (UB - LB) / UB
-						 << " < LR_gap_toleranc " << LR_gap_tolerance << endl;
+				cout << "=== will stop loop because gap " << (UB - LB) / LB
+						 << " < LR_gap_toleranc or > -LR_gap_toleranc" << LR_gap_tolerance << endl;
 
 				// here if(profitForLB > LB), it is already checked before
 				// and the new LB is stored
@@ -1212,7 +1229,7 @@ int main(int argc, char *argv[])
 						for (j = 0; j < n; j++)
 						{
 							arcCandidates[i][j][q] = 0;
-							distSumTemp[q] += dis[i][j] * solx_numV_best_d[i][j][q];
+							distSumTemp[q] += dis[i][j] * solx_d[i][j][q];
 						}
 
 				for (int q1 = 0; q1 < numV - 1; q1++)
@@ -1223,7 +1240,7 @@ int main(int argc, char *argv[])
 
 								vector<int> startNodesSet;
 								vector<int> endNodesSet;
-								if (soly_numV_best_d[i][j][q1] + soly_numV_best_d[i][j][q2] > 1.9) // if there is conflict
+								if (soly_d[i][j][q1] + soly_d[i][j][q2] > 1.9) // if there is conflict
 								{
 									startNodesSet.push_back(i);
 									endNodesSet.push_back(j);
@@ -1237,16 +1254,16 @@ int main(int argc, char *argv[])
 									{
 										int vehTemp = vehiclesTemp[vehIndex];
 										for (int k = 0; k < n; k++)
-											if (solx_numV_best_d[k][i][vehTemp] > 0.9)
-												if (soly_numV_best_d[k][i][vehTemp] < 0.1) // if the previous visited arc is not an accepted cargo
+											if (solx_d[k][i][vehTemp] > 0.9)
+												if (soly_d[k][i][vehTemp] < 0.1) // if the previous visited arc is not an accepted cargo
 												{
 													startNodesSet.push_back(k);
 													availDist[vehIndex] = availDist[vehIndex] + dis[k][i];
 												}
 
 										for (int k = 0; k < n; k++)
-											if (solx_numV_best_d[j][k][vehTemp] > 0.9)
-												if (soly_numV_best_d[j][k][vehTemp] < 0.1)
+											if (solx_d[j][k][vehTemp] > 0.9)
+												if (soly_d[j][k][vehTemp] < 0.1)
 												{
 													endNodesSet.push_back(k);
 													availDist[vehIndex] = availDist[vehIndex] + dis[j][k];
@@ -1283,11 +1300,10 @@ int main(int argc, char *argv[])
 					{
 						if (i == ogn)
 							continue;
-working this line !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 						int sumY = 0;
 						for (j = 0; j < n; j++)
 						{
-							sumY += soly_numV_best_d[i][j][q] + soly_numV_best_d[j][i][q];
+							sumY += soly_d[i][j][q] + soly_d[j][i][q];
 							sumY += selectedPositiveProfitCargos[i][j] + selectedPositiveProfitCargos[j][i];
 							sumY += arcCandidates[i][j][q] + arcCandidates[j][i][q];
 						}
@@ -1314,9 +1330,9 @@ working this line !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 						// use numV best solution from solving single vehicle problem above
 						// as the guide for calculating LB
 						// if ADD_POTENTIAL_ARCS is false, selectedPositiveProfitCargos[i][j] is all zeros
-						if (soly_numV_best_d[i][j][q] < 0.1 && selectedPositiveProfitCargos[i][j] < 0.1) // if the cargo is not selected in LR dual, then do not consider them in MVBPMP
-						{																																								 // defaul arcCandidates are all zeros
-							if (arcCandidates[i][j][q] < 0.1)																							 // if arcCandidates[i][j]==1, it means y[i][j]can be considered in model, so no need to set it to be zero
+						if (soly_d[i][j][q] < 0.1 && selectedPositiveProfitCargos[i][j] < 0.1) // if the cargo is not selected in LR dual, then do not consider them in MVBPMP
+						{																																			 // defaul arcCandidates are all zeros
+							if (arcCandidates[i][j][q] < 0.1)																		 // if arcCandidates[i][j]==1, it means y[i][j]can be considered in model, so no need to set it to be zero
 							{
 								y[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
 							}
@@ -1662,9 +1678,10 @@ working this line !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 			break;
 		}
 
-		printf("===> LB UB gap = %lf \n", (UB - LB) / UB);
-		if ((UB - LB) / UB <= LR_gap_tolerance)
-			cout << "=== will stop loop because gap < LR_gap_toleranc "
+		printf("===> LB UB gap = %lf \n", (UB - LB) / LB);
+		// if ((UB - LB) / UB <= LR_gap_tolerance)
+		if (((UB - LB) / LB > LR_gap_tolerance) || ((UB - LB) / LB < -LR_gap_tolerance))
+			cout << "=== will stop loop because gap < LR_gap_toleranc or > -LR_gap_tolerance"
 					 << LR_gap_tolerance << endl;
 
 		reportTime(endTimeOfLastIteration, endTimeOfLastIterationWallClock);
@@ -1717,7 +1734,7 @@ working this line !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 				 elapsedWallClock.count() * 1e-9);
 	printf("SolutionLB = %lf\n", LB);
 	printf("SolutionUB = %lf\n", UB);
-	printf("SolutionGap = %lf\n", (UB - LB) / UB);
+	printf("SolutionGap = %lf\n", (UB - LB) / LB);
 
 	//*********************** START STAGE TWO ****************************
 	//********************************************************************

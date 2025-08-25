@@ -73,6 +73,7 @@ double ****solu_GRB = NULL;
 double **sols_GRB = NULL;
 double LBinGRB = -bigM;
 double UBinGRB = bigM;
+double LBzero = 0.0000000001;
 
 string
 itos(int i)
@@ -400,7 +401,7 @@ int main(int argc, char *argv[])
 		numV = stoi(argv[2]);
 		TIME_LIMIT = stoi(argv[4]);
 
-		string argument5 = argv[5]; 
+		string argument5 = argv[5];
 		if (argument5 == "useOMP")
 			RUN_IN_PARALLEL_OMP = true;
 		else if (argument5 == "noOMP")
@@ -805,7 +806,7 @@ int main(int argc, char *argv[])
 			beginTime = clock();
 
 			endTimeOfLastIterationWallClock = high_resolution_clock::now();
-			while ((UB - LB) / UB > LR_gap_tolerance)
+			while (((UB - LB) / LB > LR_gap_tolerance) || ((UB - LB) / LB < -LR_gap_tolerance))
 			{
 				auto endWallClock = high_resolution_clock::now();
 				auto elapsedWallClock = duration_cast<std::chrono::nanoseconds>(endWallClock - beginWallClock);
@@ -1462,10 +1463,14 @@ int main(int argc, char *argv[])
 						exit(1);
 					}
 
-					if ((UB - LB) / UB <= LR_gap_tolerance)
+					if (LB == 0)
+						LB = LBzero;
+
+					// if ((UB - LB) / LB <= LR_gap_tolerance)
+					if (((UB - LB) / LB > LR_gap_tolerance) || ((UB - LB) / LB < -LR_gap_tolerance))
 					{
-						cout << "=== will stop loop because gap " << (UB - LB) / UB
-								 << " < LR_gap_toleranc " << LR_gap_tolerance << endl;
+						cout << "=== will stop loop because gap " << (UB - LB) / LB
+								 << " < LR_gap_tolerance  or > -LR_gap_tolerance" << LR_gap_tolerance << endl;
 
 						// here if(profitForLB > LB), it is already checked before
 						// and the new LB is stored
@@ -2088,9 +2093,13 @@ int main(int argc, char *argv[])
 						printf("===> UBinGRB = %lf is a better upper bound\n", UBinGRB);
 					}
 
-					printf("===> LB UB gap = %lf \n", (UB - LB) / UB);
-					if ((UB - LB) / UB <= LR_gap_tolerance)
-						cout << "=== will stop loop because gap < LR_gap_toleranc "
+					if (LB == 0)
+						LB = LBzero;
+
+					printf("===> LB UB gap = %lf \n", (UB - LB) / LB);
+					// if ((UB - LB) / LB <= LR_gap_tolerance)
+					if (((UB - LB) / LB > LR_gap_tolerance) || ((UB - LB) / LB < -LR_gap_tolerance))
+						cout << "=== will stop loop because gap < LR_gap_tolerance or > -LR_gap_tolerance"
 								 << LR_gap_tolerance << endl;
 
 					reportTime(endTimeOfLastIteration, endTimeOfLastIterationWallClock);
@@ -2149,7 +2158,7 @@ int main(int argc, char *argv[])
 						 elapsedWallClock.count() * 1e-9);
 			printf("SolutionLB = %lf\n", LB);
 			printf("SolutionUB = %lf\n", UB);
-			printf("SolutionGap = %lf\n", (UB - LB) / UB);
+			printf("SolutionGap = %lf\n", (UB - LB) / LB);
 			exit(1);
 		}
 		else
@@ -2492,7 +2501,7 @@ int main(int argc, char *argv[])
 								 elapsedWallClock.count() * 1e-9);
 					printf("SolutionLB = %lf\n", LB);
 					printf("SolutionUB = %lf\n", UB);
-					printf("SolutionGap = %lf\n", (UB - LB) / UB);
+					printf("SolutionGap = %lf\n", (UB - LB) / LB);
 					exit(1);
 				}
 			}
@@ -2533,7 +2542,7 @@ int main(int argc, char *argv[])
 	// 			 elapsedWallClock.count() * 1e-9);
 	// printf("SolutionLB = %lf\n", LB);
 	// printf("SolutionUB = %lf\n", UB);
-	// printf("SolutionGap = %lf\n", (UB - LB) / UB);
+	// printf("SolutionGap = %lf\n", (UB - LB) / LB);
 
 	//*********************** START STAGE TWO ****************************
 	//********************************************************************
