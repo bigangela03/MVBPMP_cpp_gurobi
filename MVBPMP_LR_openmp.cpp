@@ -21,6 +21,8 @@
 
 #include <omp.h>
 
+#include "MVBPMP_common_functions_LR_OMP.h"
+
 using namespace std;
 using namespace std::chrono;
 using namespace std::string_literals;
@@ -79,16 +81,28 @@ double LBinGRB = -bigM;
 double UBinGRB = bigM;
 double LBzero = 0.0000000001;
 double LBinLR = -bigM;
+double UBinLR = bigM;
 
 int TIME_LIMIT = 3600;
 
-string
-itos(int i)
-{
-	stringstream s;
-	s << i;
-	return s.str();
-}
+void updateLRmultiplierTypeC(double ***, double, double *, double **, double, double);
+void printVar(double ***, double ***, double ****, int *);
+void updateLRmultiplierTypeB(double ***, double **, double, int, int);
+void reportTime(clock_t, auto);
+// void storeBestLB(double ***, double ***, double ****, double **, double ***, double ***,
+// 								 double ****, double **);
+void storeBestLB(double ***, double ***, double ***, double ***, int);
+// double updateUB(double);
+// void printBestLB(double);
+// void printBestUB(double);
+
+// string
+// itos(int i)
+// {
+// 	stringstream s;
+// 	s << i;
+// 	return s.str();
+// }
 
 struct Cargo
 {
@@ -209,14 +223,6 @@ protected:
 		}
 	}
 };
-
-void updateLRmultiplierTypeC(double ***, double, double *, double **, double, double);
-void printVar(double ***, double ***, double ****, int *);
-void updateLRmultiplierTypeB(double ***, double **, double, int, int);
-void reportTime(clock_t, auto);
-// void storeBestLB(double ***, double ***, double ****, double **, double ***, double ***,
-// 								 double ****, double **);
-void storeBestLB(double ***, double ***, double ***, double ***, int);
 
 //====================================================================================
 // void storeBestLB(double ***solx_d, double ***soly_d, double ****solu_d,
@@ -958,6 +964,53 @@ int main(int argc, char *argv[])
 							// cout << "numViolatedTriples=" << numViolatedTriples << endl;
 						}
 
+						{
+							double yUpperBoundCopy[n][n];
+							for (i = 0; i < n; i++)
+								for (j = 0; j < n; j++)
+									yUpperBoundCopy[i][j] = 1;
+
+							int countTemp = 0;
+							for (i = 0; i < n; i++)
+								for (j = 0; j < n; j++)
+									if (price * dis[i][j] * wt[i][j] - LR_u[i][j] <= 0)
+									{
+										y[i][j].set(GRB_DoubleAttr_UB, 0);
+										yUpperBoundCopy[i][j] = 0;
+										countTemp++;
+									}
+							cout << "===> number of y that is set to be zero because Lagrangian multiplier is non-positive: " << countTemp << endl;
+
+							// if a node has no cargoes in or out, then corresponding x var is zero
+							cout << "===> nodes  that won't be visited:" << endl;
+							countTemp = 0;
+							for (i = 0; i < n; i++)
+							{
+								double sumYub = 0; // ub means upper bound
+								for (j = 0; j < n; j++)
+								{
+									double ubTemp1 = yUpperBoundCopy[i][j];
+									double ubTemp2 = yUpperBoundCopy[j][i];
+									sumYub += ubTemp1 + ubTemp2;
+
+									if (ubTemp1 > 0.99 || ubTemp2 > 0.99)
+										break;
+								}
+								if (sumYub < 0.01)
+								{
+									cout << i + 1 << " ";
+									for (j = 0; j < n; j++)
+									{
+										x[i][j].set(GRB_DoubleAttr_UB, 0);
+										x[j][i].set(GRB_DoubleAttr_UB, 0);
+										countTemp += 2;
+									}
+								}
+							}
+							cout << endl;
+							cout << "===>number of x set to zero: " << countTemp << endl;
+						}
+
 						//==============generate constraints in Gurobi================
 						// vehicle goes out of vehicle's origin
 						GRBLinExpr expr1 = 0.0;
@@ -1219,18 +1272,18 @@ int main(int argc, char *argv[])
 
 				double profitInLRdual = totalProfit;
 
-				if (profitInLRdual < UB)
-					UB = profitInLRdual;
+				if (profitInLRdual < UBinLR)
+					UBinLR = profitInLRdual;
 
-				cout << "===> UB = " << UB << endl;
+				cout << "===> UBinLR = " << UBinLR << endl;
 
-				if (UB >= LR_lowestUpperBound)
+				if (UBinLR >= LR_lowestUpperBound)
 					LR_numNoImprovement++;
 				else
 				{
 					LR_numNoImprovement = 0;
-					LR_lowestUpperBound = UB;
-					cout << "find lower UB" << endl;
+					LR_lowestUpperBound = UBinLR;
+					cout << "find lower UBinLR" << endl;
 				}
 
 				printf("===> LR_numNoImprovement = %d\n", LR_numNoImprovement);
@@ -1308,6 +1361,9 @@ int main(int argc, char *argv[])
 					// 	storeBestLB(solx_d, soly_d, solu_d, sols_d, solx_best, soly_best,
 					// 							solu_best, sols_best, n);
 					// }
+
+					if (profitForLB > LBinLR)
+						LBinLR = profitForLB;
 
 					if (profitForLB > LBinGRB && profitForLB > LB)
 					{
@@ -1468,7 +1524,7 @@ int main(int argc, char *argv[])
 							x[n - 1][i][q].set(GRB_DoubleAttr_UB, 0);
 							y[n - 1][i][q].set(GRB_DoubleAttr_UB, 0);
 							for (j = 0; j < n; j++)
-								if (wt[i][j] == 0)
+								if (wt[i][j] > -0.00000001 && wt[i][j] < 0.00000001)
 									y[i][j][q].set(GRB_DoubleAttr_UB, 0);
 						}
 
@@ -1974,6 +2030,12 @@ int main(int argc, char *argv[])
 
 						double objtemp = model.get(GRB_DoubleAttr_ObjVal);
 						cout << "OBJ: " << objtemp << endl;
+						if (objtemp > LBinLR)
+						{
+							LBinLR = objtemp;
+							cout << "===> LBinLR is updated by LR LB calculation." << endl;
+						}
+
 						// update LB
 						if (objtemp > LB)
 						{
@@ -2118,11 +2180,9 @@ int main(int argc, char *argv[])
 					break;
 				}
 
-				if (UB > UBinGRB)
-				{
-					UB = UBinGRB;
-					printf("===> UBinGRB = %lf is a better upper bound\n", UBinGRB);
-				}
+				//======> update UB <======
+
+				UB = updateUB(UB, UBinLR, UBinGRB);
 
 				if (LB == 0)
 					LB = LBzero;
@@ -2186,14 +2246,8 @@ int main(int argc, char *argv[])
 			printf("SolutionUB = %lf\n", UB);
 			printf("SolutionGap = %lf\n", (UB - LB) / LB);
 
-			if (LBinLR == LB && LBinGRB < LB)
-				cout << "Best LB is found by LR" << endl;
-			else if (LBinLR < LB && LBinGRB == LB)
-				cout << "Best LB is found by GRB in parallel" << endl;
-			else if (LBinLR == LB && LBinGRB == LB)
-				cout << "Best LB is found by both LR and GRB in parallel" << endl;
-			else
-				printf("ERROR: LB=%lf, LBinLR=%lf, LBinGRB=%lf\n", LB, LBinLR, LBinGRB);
+			printBestLB(LB, LBinLR, LBinGRB);
+			printBestUB(UB, UBinLR, UBinGRB);
 
 			exit(1);
 		}
@@ -2289,7 +2343,7 @@ int main(int argc, char *argv[])
 						x[n - 1][i][q].set(GRB_DoubleAttr_UB, 0);
 						y[n - 1][i][q].set(GRB_DoubleAttr_UB, 0);
 						for (j = 0; j < n; j++)
-							if (wt[i][j] == 0)
+							if (wt[i][j] > -0.00000001 && wt[i][j] < 0.00000001)
 								y[i][j][q].set(GRB_DoubleAttr_UB, 0);
 					}
 
@@ -2619,7 +2673,8 @@ int main(int argc, char *argv[])
 					printf("SolutionLB = %lf\n", LB);
 					printf("SolutionUB = %lf\n", UB);
 					printf("SolutionGap = %lf\n", (UB - LB) / LB);
-					cout << "Best LB is found by GRB in parallel (find optimal solution)" << endl;
+					cout << "BestLowerBoundSolver = GRB" << endl;
+					cout << "BestUpperBoundSolver = GRB" << endl;
 					exit(1);
 				}
 			}
