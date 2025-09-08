@@ -1,4 +1,8 @@
-scp MVBPMP_LR_openmp.cpp ydong@m3.smu.edu:~/MVBPMP_gurobi_HPC/
+scp MVBPMP_LR_openmp.cpp ydong@m3.smu.edu:~/MVBPMP_cpp_HPC/
+scp MVBPMP_LR_openMP_sameStartNode.cpp ydong@m3.smu.edu:~/MVBPMP_cpp_HPC/
+scp MVBPMP_LR_globalVar.cpp ydong@m3.smu.edu:~/MVBPMP_cpp_HPC/
+scp MVBPMP_LR_globalVar.h ydong@m3.smu.edu:~/MVBPMP_cpp_HPC/
+scp MVBPMP_LR_commonFunctions.h ydong@m3.smu.edu:~/MVBPMP_cpp_HPC/
 #scp MVBPMP_LR.cpp ydong@m3.smu.edu:~/MVBPMP_gurobi_HPC/
 #scp tsp_c++_angela.cpp ydong@m3.smu.edu:~/MVBPMP_gurobi_HPC/
 #scp BPMP.cpp ydong@m3.smu.edu:~/MVBPMP_gurobi_HPC/

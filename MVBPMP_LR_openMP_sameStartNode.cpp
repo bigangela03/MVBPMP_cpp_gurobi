@@ -21,7 +21,8 @@
 
 #include <omp.h>
 
-#include "MVBPMP_common_functions_LR_OMP.h"
+#include "MVBPMP_LR_commonFunctions.h"
+#include "MVBPMP_LR_globalVar.h"
 
 using namespace std;
 using namespace std::chrono;
@@ -39,18 +40,16 @@ int NUM_NODES;
 // should be set up at least 9*3=27
 int NUM_THREADS_VEH = 28; // number of threads for solving each vehicle's BPMP model
 
-double INITIAL_U_COEFFICIENT;
-
-double LR_gap_tolerance = 0.05;
-double LR_complementarity_tolerance = 0.0001;
-double LR_min_lamda = 0.0001;
-double LR_miu_tolerance = 0.00000001;
+// double LR_gap_tolerance = 0.05;
+// double LR_complementarity_tolerance = 0.0001;
+// double LR_min_lamda = 0.0001;
+// double LR_miu_tolerance = 0.00000001;
+// double LR_lamda = 2;
+// int LR_maxNumNoImprovement = 3;
+// double LR_rou = 0.4; // for LR multiplier type b
 
 // feed the LR solution to Gurobi and find the optimal solution
 bool DO_STAGE_TWO = false;
-
-bool PRINT_x_WHEN_INTEGER_SOL = false;
-bool PRINT_y_WHEN_INTEGER_SOL = false;
 
 // according to p174 on "Integer Programming" by Laurence A. Wolsey 1st edition
 bool USE_LR_MULTIPLIER_TYPE_B = false;
@@ -65,20 +64,20 @@ bool ADD_PREPROCESS = true;
 bool ADD_POTENTIAL_ARCS = true;
 double percentageOfPotArcs = 0;
 bool RUN_IN_PARALLEL_OMP = true; // it will be overwritten by passed arguments
-int TIME_LIMIT = 3600;					 // it will be overwritten by passed arguments
+// int TIME_LIMIT = 3600;					 // it will be overwritten by passed arguments
 
-double bigM = 10000000;
+// double bigM = 10000000;
 
 // solution from solving MVBPMP in Gurobi
 double ***solx_GRB = NULL;
 double ***soly_GRB = NULL;
 double ****solu_GRB = NULL;
 double **sols_GRB = NULL;
-double LBinGRB = -bigM;
-double UBinGRB = bigM;
-double LBzero = 0.0000000001;
-double LBinLR = -bigM;
-double UBinLR = bigM;
+// double LBinGRB = -bigM;
+// double UBinGRB = bigM;
+// double LBzero = 0.0000000001;
+// double LBinLR = -bigM;
+// double UBinLR = bigM;
 
 void updateLRmultiplierTypeC(double ***, double, double *, double **, double, double);
 void printVar(double ***, double ***, double ****, int *);
@@ -152,22 +151,6 @@ protected:
 				printf("--------> GRB:  UB = %lf.\n", UBinGRB);
 
 				int i, j, q;
-				// double ***x = NULL;
-				// double ***y = NULL;
-
-				// x = new double **[n];
-				// y = new double **[n];
-
-				// for (i = 0; i < n; i++)
-				// {
-				// 	x[i] = new double *[n];
-				// 	y[i] = new double *[n];
-				// 	for (j = 0; j < n; j++)
-				// 	{
-				// 		x[i][j] = new double[numV];
-				// 		y[i][j] = new double[numV];
-				// 	}
-				// }
 
 				for (i = 0; i < n; i++)
 				{
@@ -179,32 +162,15 @@ protected:
 						for (int k = 0; k < n; k++)
 							solu_GRB[i][j][k] = getSolution(uv[i][j][k], numV);
 
-						for (q = 0; q < numV; q++)
-						{
-							if (PRINT_x_WHEN_INTEGER_SOL)
-								if (solx_GRB[i][j][q] > 0.5)
-									printf("x: %3d ->%3d (v%d)\n", i + 1, j + 1,
-												 q + 1);
-							if (PRINT_y_WHEN_INTEGER_SOL)
-								if (soly_GRB[i][j][q] > 0.5)
-									printf("y: %3d ->%3d (v%d)\n", i + 1, j + 1,
-												 q + 1);
-						}
+						// for (q = 0; q < numV; q++)
+						// {
+						// 	if (solx_GRB[i][j][q] > 0.5)
+						// 		printf("x: %3d ->%3d (v%d)\n", i + 1, j + 1, q + 1);
+						// 	if (soly_GRB[i][j][q] > 0.5)
+						// 		printf("y: %3d ->%3d (v%d)\n", i + 1, j + 1, q + 1);
+						// }
 					}
 				}
-
-				// for (i = 0; i < n; i++)
-				// {
-				// 	for (j = 0; j < n; j++)
-				// 	{
-				// 		delete[] x[i][j];
-				// 		delete[] y[i][j];
-				// 	}
-				// 	delete[] x[i];
-				// 	delete[] y[i];
-				// }
-				// delete[] x;
-				// delete[] y;
 			}
 		}
 		catch (GRBException e)
@@ -735,13 +701,6 @@ int main(int argc, char *argv[])
 		if (outer_thread_id == 0)
 		{
 
-			// double UB = bigM;
-			// double LB = -bigM;
-
-			double LR_rou = 0.4; // for LR multiplier type b
-
-			double LR_lamda = 2;
-			int LR_maxNumNoImprovement = 3;
 			int LR_numNoImprovement = 0;
 
 			bool findOptimalSolution = false;
@@ -1233,7 +1192,7 @@ int main(int argc, char *argv[])
 									{
 										double yval = y[i][j].get(GRB_DoubleAttr_Xn);
 										if (yval > 0.99 && yval < 1.01)
-											printf("%3d %3d  (w=%.2lf)\n", i + 1, j + 1, wt[i][j]);
+											printf("%3d %3d  (w=%.2lf, LRmul=%lf)\n", i + 1, j + 1, wt[i][j], price * dis[i][j] * wt[i][j] - LR_u[i][j]);
 										soly_numV_best_d[i][j][e] = yval;
 									}
 								// printf("------ print theta>0.000001 ------\n");
@@ -1314,11 +1273,7 @@ int main(int argc, char *argv[])
 				int numOptimalProfitSol = 1;
 
 				for (int i = 1; i < numV; i++)
-				{ // we assume than if the next best profit is within range below, it is the same as the best one
-					// for example, if p1=1.999999, p2=1.999998, then by scaling up by a factor of 2500
-					// p1=1.999999*2500=$4999.9975, p2=999998*2500=$4999.995, the diff is less than 1 cent
-					// so we assume these two profits are the same
-					double pftTolerance = 0.000001;
+				{
 					if (profit_d[i] >= profit_d[0] - pftTolerance && profit_d[i] <= profit_d[0] + pftTolerance)
 						numOptimalProfitSol++;
 				}
@@ -1413,13 +1368,13 @@ int main(int argc, char *argv[])
 
 				cout << "===> LR_lamda = " << LR_lamda << endl;
 
-				if (LR_lamda <= LR_min_lamda)
-				{
-					cout << "===> LR_lamda is less than LR_min_damda " << LR_min_lamda
-							 << endl;
-					cout << "end loop";
-					break;
-				}
+				// if (LR_lamda <= LR_min_lamda)
+				// {
+				// 	cout << "===> LR_lamda is less than LR_min_damda " << LR_min_lamda
+				// 			 << endl;
+				// 	cout << "end loop";
+				// 	break;
+				// }
 
 				for (int i = 0; i < n; i++)
 				{
@@ -1478,6 +1433,8 @@ int main(int argc, char *argv[])
 
 							// no need to store the solution since the optimal solution is found
 							// and there is no need to feed solution to MVBPMP model to find optimal solution
+
+						
 							break;
 						}
 						else
@@ -1600,13 +1557,13 @@ int main(int argc, char *argv[])
 						// if(profitForLB <= LB), then no need to store the sol?_d solution as best LB
 						// so to conclude, no need to storeBestLB here
 						// storeBestLB (solx_d, soly_d, solu_d, sols_d, solx_best, soly_best, solu_best, sols_best);
-
+						
 						break;
 					}
 					// else
 					// 	continue; // jump to the next iteration of while loop
 
-					continue;
+					// continue;
 				}
 				else
 				{
@@ -2289,12 +2246,9 @@ int main(int argc, char *argv[])
 					{
 						cout << "=== will stop loop because LR_miu < LR_miu_tolerance "
 								 << LR_miu_tolerance << endl;
+
 						break;
 					}
-
-					//======> update UB <======
-
-					UB = updateUB(UB, UBinLR, UBinGRB);
 
 					if (LB == 0)
 						LB = LBzero;
@@ -2309,7 +2263,12 @@ int main(int argc, char *argv[])
 					endTimeOfLastIteration = clock();
 					endTimeOfLastIterationWallClock = high_resolution_clock::now();
 				}
+				//======> update UB <======
+				UB = updateUB(UB, UBinLR, UBinGRB);
 			} // end of while loop
+
+			//======> update UB <======
+			UB = updateUB(UB, UBinLR, UBinGRB);
 
 			for (int i = 0; i < n; i++)
 			{
