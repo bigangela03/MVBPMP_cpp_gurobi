@@ -1609,15 +1609,14 @@ int main(int argc, char *argv[])
 									for (i = 0; i < n; i++)
 										for (j = 0; j < n; j++)
 										{
-
-											vector<int> startNodesSet;
-											vector<int> endNodesSet;
+											// vector<int> startNodesSet;
+											// vector<int> endNodesSet;
 											if (soly_d[i][j][q1] + soly_d[i][j][q2] > 1.9) // if there is conflict
 											{
 												// printf("check arc %d to %d by veh%d and veh%d\n", i + 1, j + 1, q1 + 1, q2 + 1);
 
-												startNodesSet.push_back(i);
-												endNodesSet.push_back(j);
+												// startNodesSet.push_back(i);
+												// endNodesSet.push_back(j);
 
 												vector<double> availDist = {disLimit - distSumTemp[q1] + dis[i][j], disLimit - distSumTemp[q2] + dis[i][j]};
 
@@ -1626,6 +1625,10 @@ int main(int argc, char *argv[])
 												// for (auto &vehTemp : vehiclesTemp)
 												for (int vehIndex = 0; vehIndex < vehiclesTemp.size(); vehIndex++)
 												{
+													vector<int> startNodesSet;
+													vector<int> endNodesSet;
+													startNodesSet.push_back(i);
+													endNodesSet.push_back(j);
 
 													int vehTemp = vehiclesTemp[vehIndex];
 
@@ -1793,7 +1796,7 @@ int main(int argc, char *argv[])
 										else
 											y[i][j][q].set(GRB_DoubleAttr_UB, 0);
 								}
-								else if (sumY < 0.1)
+								else if (sumY < 0.1 && arcCandidates[i][j][q] == 0)
 									for (q = 0; q < numV; q++)
 										y[i][j][q].set(GRB_DoubleAttr_UB, 0);
 							}

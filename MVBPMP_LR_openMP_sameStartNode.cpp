@@ -1434,7 +1434,6 @@ int main(int argc, char *argv[])
 							// no need to store the solution since the optimal solution is found
 							// and there is no need to feed solution to MVBPMP model to find optimal solution
 
-						
 							break;
 						}
 						else
@@ -1557,7 +1556,7 @@ int main(int argc, char *argv[])
 						// if(profitForLB <= LB), then no need to store the sol?_d solution as best LB
 						// so to conclude, no need to storeBestLB here
 						// storeBestLB (solx_d, soly_d, solu_d, sols_d, solx_best, soly_best, solu_best, sols_best);
-						
+
 						break;
 					}
 					// else
@@ -1726,15 +1725,14 @@ int main(int argc, char *argv[])
 									for (i = 0; i < n; i++)
 										for (j = 0; j < n; j++)
 										{
-
-											vector<int> startNodesSet;
-											vector<int> endNodesSet;
+											// vector<int> startNodesSet;
+											// vector<int> endNodesSet;
 											if (soly_numV_best_d[i][j][q1] + soly_numV_best_d[i][j][q2] > 1.9) // if there is conflict
 											{
 												// printf("check arc %d to %d by veh%d and veh%d\n", i + 1, j + 1, q1 + 1, q2 + 1);
 
-												startNodesSet.push_back(i);
-												endNodesSet.push_back(j);
+												// startNodesSet.push_back(i);
+												// endNodesSet.push_back(j);
 
 												vector<double> availDist = {disLimit - distSumTemp[q1] + dis[i][j], disLimit - distSumTemp[q2] + dis[i][j]};
 
@@ -1743,6 +1741,10 @@ int main(int argc, char *argv[])
 												// for (auto &vehTemp : vehiclesTemp)
 												for (int vehIndex = 0; vehIndex < vehiclesTemp.size(); vehIndex++)
 												{
+													vector<int> startNodesSet;
+													vector<int> endNodesSet;
+													startNodesSet.push_back(i);
+													endNodesSet.push_back(j);
 
 													int vehTemp = vehiclesTemp[vehIndex];
 
@@ -1834,16 +1836,16 @@ int main(int argc, char *argv[])
 
 										// if a node has no cargos in or out, and not on route then it won't be visited
 										// if (sumY < 0.01 && nodesVisitStatus[i][q] < 0.1)
-										if (sols_potentialArcs[i][q] > -0.01 && sols_potentialArcs[i][q] < 0.01)
+										if (sols_potentialArcs[i][q] > -0.01 && sols_potentialArcs[i][q] < 0.01) // check (=0)
 											for (j = 0; j < n; j++)
 												x[j][i][q].set(GRB_DoubleAttr_UB, 0.0);
-										else if (sols_potentialArcs[i][q] > 0.9) // node i is selected in original solution
+										else if (sols_potentialArcs[i][q] > 0.9) // check (=1). node i is selected in original solution
 										{
 											for (j = 0; j < n; j++)
-												if (sols_potentialArcs[j][q] > -0.01 && sols_potentialArcs[j][q] < 0.1) // node j is not in candidate visit node list
+												if (sols_potentialArcs[j][q] > -0.01 && sols_potentialArcs[j][q] < 0.1) // check (=0). node j is not in candidate visit node list
 													x[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
-												else if (sols_potentialArcs[j][q] > 0.9)
-												{ // node j is in candidate visite node list
+												else if (sols_potentialArcs[j][q] > 0.9) // check (=1)
+												{																				 // node j is in candidate visite node list
 													// both i and j are selected in original solution,but i is visited after j
 													if (sols_potentialArcs[i][q] > sols_potentialArcs[j][q])
 														x[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
@@ -1855,13 +1857,13 @@ int main(int argc, char *argv[])
 												// so node 4 can be inserted between multiple nodes pair, so we need arcCandidates[i][j][q]
 												// to know which arcs are ok to be inserted
 												// if we only use sols_potentialArcs[i][q], in such case, we can't record more than one insert point
-												else if (sols_potentialArcs[j][q] < -0.9 && sols_potentialArcs[j][q] > -1.1)
-												{ // sols_potentialArcs[j][q]=-1 means node j is a candidate node for vehicle q's route
+												else if (sols_potentialArcs[j][q] < -0.9 && sols_potentialArcs[j][q] > -1.1) // check (= -1)
+												{																																						 // sols_potentialArcs[j][q]=-1 means node j is a candidate node for vehicle q's route
 													if (arcCandidates[i][j][q] == 0)
 														x[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
 												}
 										}
-										else if (sols_potentialArcs[i][q] < -0.9 && sols_potentialArcs[i][q] > -1.1)
+										else if (sols_potentialArcs[i][q] < -0.9 && sols_potentialArcs[i][q] > -1.1) // check (= -1)
 											for (j = 0; j < n; j++)
 												if (arcCandidates[i][j][q] == 0)
 													x[i][j][q].set(GRB_DoubleAttr_UB, 0.0);
@@ -1908,7 +1910,7 @@ int main(int argc, char *argv[])
 										else
 											y[i][j][q].set(GRB_DoubleAttr_UB, 0);
 								}
-								else if (sumY < 0.1)
+								else if (sumY < 0.1 && arcCandidates[i][j][q] == 0)
 									for (q = 0; q < numV; q++)
 										y[i][j][q].set(GRB_DoubleAttr_UB, 0);
 							}
